@@ -98,15 +98,22 @@ pub fn run(click_through: bool) -> Result<()> {
             }
 
             let focus_after = focus(&hypr);
-            out(format!(
-                "focus:       {}{}",
-                focus_before.as_deref().unwrap_or("(none)"),
-                if focus_before == focus_after {
-                    "  (unchanged)"
-                } else {
-                    "  CHANGED - the overlay stole focus"
-                }
-            ));
+            // The overlay sets KeyboardInteractivity::None and is not a
+            // toplevel, so it can never be the focused window. A change here
+            // means the warps dragged focus across real windows under
+            // follow_mouse, or a human touched the mouse mid-run - noted, but
+            // not evidence against the overlay.
+            out(match (&focus_before, &focus_after) {
+                (a, b) if a == b => format!(
+                    "focus:       {}  (unchanged)",
+                    a.as_deref().unwrap_or("(none)")
+                ),
+                (a, b) => format!(
+                    "focus:       {} -> {}  (moved under follow_mouse; the overlay cannot take focus)",
+                    a.as_deref().unwrap_or("(none)"),
+                    b.as_deref().unwrap_or("(none)")
+                ),
+            });
 
             std::thread::sleep(Duration::from_millis(250));
             stop.store(true, Ordering::Relaxed);
