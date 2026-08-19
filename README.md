@@ -11,19 +11,26 @@ state machine.
 
 ## Status
 
-Both of the original's ground-truth suites pass — the **circuit invariants** and
-all **17 end-to-end behaviour checks**. The **sense layer works against live
-Hyprland 0.56.2** and the **click-through overlay is proven**. What is left is
-drawing: wiring the senses to the sim, and putting a fly on the screen.
+**It runs.** There is a fly on the screen, walking on your windows, startling
+when the cursor lunges at it, driven by 668 real neurons. Both of the original's
+ground-truth suites pass — the circuit invariants and all 17 end-to-end
+behaviour checks.
 
 ```
-cargo test --workspace                          # 44 tests
+cargo run --release -p gnat                     # put a fly on the screen
+```
+
+```
+cargo test --workspace                          # 66 tests
 cargo run --release -p gnat -- --simtest        # circuit invariants, on real data
 cargo run --release -p gnat -- --behaviortest   # stimulate neurons, watch the body react
+cargo run --release -p gnat -- --snapshot f.png # headless render, plus a zoomed crop
 cargo run -p gnat -- --senses                   # one reading from every desktop sense
 cargo run -p gnat-senses --example probe        # live 20s dump of the whole sense layer
 cargo run --release -p gnat -- --overlay-test   # measure the click-through claim
 ```
+
+What is left is the brain view and a control surface.
 
 `--simtest` on this machine:
 
@@ -51,7 +58,7 @@ fires **4 ms** after an abrupt loom (bound is ~10 ms), walk-drive duty 26%
 | `gnat-body` | Behaviour states, gait, flight, ledges, sleep, and the 17-check behaviour suite. No OS dependencies. | **ported** |
 | `gnat-senses` | Hyprland IPC, window terrain, looming, thermal, clock, activity. | **working** |
 | `gnat-overlay` | The click-through `wlr-layer-shell` surface, and a software canvas. | **working** |
-| `gnat` | The binary that wires them together. | 5 subcommands |
+| `gnat` | Coordinator, renderer, snapshot tool, minimal PNG writer. | **running** |
 
 ## The overlay
 
@@ -139,8 +146,14 @@ Two mechanisms carry most of the behaviour and are easy to break:
 4. **Two coordinate frames, named.** `gnat-body` works in the original's scene
    frame (origin at the centre of the output, +y up) so every ported constant
    keeps its meaning. `gnat-senses` reports screen coordinates, because that is
-   what Hyprland reports. Converting between them is milestone 5's job and is
-   deliberately not hidden inside either crate.
+   what Hyprland reports. `coord.rs` converts, and is the only place that knows.
+5. **Clicks become focus changes.** The original stimulates the sensory
+   population on any global mouse click. A Wayland client cannot see those, so
+   `activewindow` events stand in — a weaker signal, honestly weaker, rather
+   than a pretend one.
+6. **Temperature interpolates.** macOS gives four thermal buckets and the
+   original steps tempo between them. `/sys/class/hwmon` gives °C, so this maps
+   45-90 °C onto the same 1.0-1.5 tempo range continuously.
 
 ## The body
 
@@ -195,6 +208,55 @@ occasional mystery failure. Rather than loosen the checks to hide it, the tests
 assert what is actually true: the shipped seed is green, and every check clears
 75% across a seed sweep. A real regression drops a check to near zero.
 
+## Putting it together
+
+One frame, in order: sense the world, drive the circuit, step it in whole
+milliseconds, read the population rates as body commands, move the body, draw.
+
+The cursor is polled every frame and turned into a looming stimulus — angular
+expansion rate attenuated by distance, split between the two eyes by bearing
+relative to the fly's heading, plus an air puff from raw cursor speed. That
+transduction is the *only* modelling step on the input side; everything
+downstream of the LC4/LPLC2 population is the real connectome. Window geometry
+is re-read at 1.4 Hz, and a `closewindow` event forces an immediate refresh,
+because the fly may be standing on what just vanished.
+
+Two coordinate frames meet here and `coord.rs` is the only file allowed to know
+about both: Hyprland reports screen coordinates (top-left origin, +y down) and
+the body model works in the original's scene frame (centre origin, +y up). A
+sign error in that conversion looks exactly like a behaviour bug, which is why
+it lives in one named place with its own tests rather than being folded into
+either crate.
+
+### Drawing
+
+The original is SceneKit and gets lighting and depth for free. This is a plain
+pixel buffer, so altitude is conveyed the way an animator would: the fly scales
+up, and its shadow slides away and softens.
+
+`--snapshot` renders headlessly and writes both a full frame and a 6x crop
+centred on the fly, composited over a checkerboard — the canvas is transparent
+by design, so without that a correct render and an empty one look identical. It
+also reports what the fly is standing on:
+
+```
+state    Idle
+position 346,969 on screen  (alt 0.00)
+terrain  4 ledges, standing on nothing
+  ledge  y=  -540  x   -960..960     window 0x0
+  ledge  y=   528  x      5..948     window 0x55f6ae230440
+  ledge  y=   528  x   -948..-5      window 0x55f6ae27acb0
+```
+
+Two things that snapshot caught, which no test would have:
+
+- The first render was unmistakably a **spider** — legs too long, splayed too
+  wide, radiating from the body like spokes. Real fly legs tuck close underneath.
+- Every body segment was drawn **broadside-on**. `Canvas::ellipse` puts `rx`
+  along the angle it is given and `ry` across it, so passing the heading directly
+  rotates the fly a quarter turn. Not subtle once you look: it turns the fly into
+  a blob.
+
 ## How the macOS senses map onto Wayland
 
 macOS handed DesktopFly permission-free access to the global cursor, every
@@ -242,12 +304,12 @@ decision, not an engineering gap.
 2. ~~Port the simulation core and reproduce the documented invariants.~~ **Done.**
 3. ~~Click-through layer-shell overlay, measured rather than asserted.~~ **Done.**
 4. ~~Fly body and gait, and all 17 `--behaviortest` checks.~~ **Done.**
-5. **Wire it together**: window ledges as terrain, cursor as loom, thermal as
-   tempo, clock plus idle as sleep — and draw the fly into the overlay. This is
-   the first build where there is something to look at.
-6. Brain view — an ordinary xdg-toplevel, because it wants clicks.
+5. ~~Wire it together and draw the fly.~~ **Done.**
+6. **Brain view** — an ordinary xdg-toplevel, because it wants clicks. 23,210
+   point sprites and click-to-stimulate.
 7. Swap the software canvas for GL once the point cloud needs it.
 8. Control surface: a Waybar module or a socket plus `gnat pause` / `gnat add`.
+9. Multi-output, and the extra brainless flies the original supports.
 
 ## Data
 

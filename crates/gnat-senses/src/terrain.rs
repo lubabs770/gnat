@@ -12,6 +12,9 @@ pub struct Ledge {
     pub y: i32,
     pub x0: i32,
     pub x1: i32,
+    /// The window this edge belongs to, so the fly can notice when the thing
+    /// it is standing on closes. Zero is the screen floor.
+    pub id: u64,
 }
 
 impl Ledge {
@@ -34,6 +37,7 @@ pub fn ledges(clients: &[Client], screen_w: i32, screen_h: i32) -> Vec<Ledge> {
         y: screen_h,
         x0: 0,
         x1: screen_w,
+        id: 0,
     }];
 
     for (i, c) in clients.iter().enumerate() {
@@ -48,7 +52,12 @@ pub fn ledges(clients: &[Client], screen_w: i32, screen_h: i32) -> Vec<Ledge> {
 
         for (x0, x1) in subtract_spans(c.left(), c.right(), &occluders) {
             if x1 > x0 {
-                out.push(Ledge { y: c.top(), x0, x1 });
+                out.push(Ledge {
+                    y: c.top(),
+                    x0,
+                    x1,
+                    id: c.id(),
+                });
             }
         }
     }
@@ -189,7 +198,8 @@ mod tests {
             vec![Ledge {
                 y: 1080,
                 x0: 0,
-                x1: 1920
+                x1: 1920,
+                id: 0,
             }]
         );
     }
@@ -197,11 +207,7 @@ mod tests {
     #[test]
     fn a_window_top_becomes_a_ledge() {
         let l = ledges(&[client(100, 200, 400, 300)], 1920, 1080);
-        assert!(l.contains(&Ledge {
-            y: 200,
-            x0: 100,
-            x1: 500
-        }));
+        assert!(l.iter().any(|g| (g.y, g.x0, g.x1) == (200, 100, 500)));
     }
 
     #[test]
@@ -211,28 +217,17 @@ mod tests {
         let back = client(100, 200, 400, 300);
         let l = ledges(&[front, back], 1920, 1080);
 
+        let spans: Vec<(i32, i32, i32)> = l.iter().map(|g| (g.y, g.x0, g.x1)).collect();
         assert!(
-            l.contains(&Ledge {
-                y: 200,
-                x0: 100,
-                x1: 200
-            }),
-            "left fragment missing: {l:?}"
+            spans.contains(&(200, 100, 200)),
+            "left fragment missing: {spans:?}"
         );
         assert!(
-            l.contains(&Ledge {
-                y: 200,
-                x0: 300,
-                x1: 500
-            }),
-            "right fragment missing: {l:?}"
+            spans.contains(&(200, 300, 500)),
+            "right fragment missing: {spans:?}"
         );
         assert!(
-            !l.contains(&Ledge {
-                y: 200,
-                x0: 100,
-                x1: 500
-            }),
+            !spans.contains(&(200, 100, 500)),
             "buried span still walkable"
         );
     }

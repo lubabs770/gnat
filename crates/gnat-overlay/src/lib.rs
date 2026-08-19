@@ -139,6 +139,55 @@ impl Canvas<'_> {
             }
         }
     }
+
+    /// Filled ellipse with semi-axes `rx`/`ry`, rotated by `angle` radians.
+    ///
+    /// Iterates the *bounding box* of the rotated shape and tests each pixel
+    /// against the un-rotated ellipse equation, which keeps the edge clean at
+    /// any angle without needing a scanline rasteriser.
+    pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, angle: f32, c: Rgba) {
+        if rx <= 0.0 || ry <= 0.0 {
+            return;
+        }
+        let (sin, cos) = angle.sin_cos();
+        let half_w = (rx * cos).abs() + (ry * sin).abs();
+        let half_h = (rx * sin).abs() + (ry * cos).abs();
+
+        let x0 = (cx - half_w).floor() as i32;
+        let x1 = (cx + half_w).ceil() as i32;
+        let y0 = (cy - half_h).floor() as i32;
+        let y1 = (cy + half_h).ceil() as i32;
+
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                // Rotate the sample back into the ellipse's own frame.
+                let u = dx * cos + dy * sin;
+                let v = -dx * sin + dy * cos;
+                if (u / rx).powi(2) + (v / ry).powi(2) <= 1.0 {
+                    self.put(x, y, c);
+                }
+            }
+        }
+    }
+
+    /// Line of the given width, drawn as a run of discs. Widths under 2 fall
+    /// back to single pixels, which is what legs and antennae want.
+    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len = (dx * dx + dy * dy).sqrt();
+        let steps = len.ceil().max(1.0) as i32;
+        let r = (width / 2.0).round() as i32;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let (x, y) = (x0 + dx * t, y0 + dy * t);
+            if r < 1 {
+                self.put(x.round() as i32, y.round() as i32, c);
+            } else {
+                self.disc(x.round() as i32, y.round() as i32, r, c);
+            }
+        }
+    }
 }
 
 /// What the draw callback returns.

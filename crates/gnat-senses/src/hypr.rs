@@ -54,6 +54,12 @@ impl Client {
     pub fn bottom(&self) -> i32 {
         self.at.1 + self.size.1
     }
+    /// The window address as a number, for use as a stable ledge identity.
+    /// Hyprland reports it as `0x55f6ae1c4d30`.
+    pub fn id(&self) -> u64 {
+        u64::from_str_radix(self.address.trim_start_matches("0x"), 16).unwrap_or(0)
+    }
+
     pub fn area(&self) -> i64 {
         self.size.0 as i64 * self.size.1 as i64
     }
@@ -425,6 +431,15 @@ mod tests {
             .map(|c| (c.floating, c.focus_history_id))
             .collect();
         assert_eq!(order, vec![(true, 1), (true, 3), (false, 0), (false, 1)]);
+    }
+
+    #[test]
+    fn window_addresses_parse_into_ids() {
+        let mut c = client(false, 0);
+        c.address = "0x55f6ae1c4d30".into();
+        assert_eq!(c.id(), 0x55f6ae1c4d30);
+        c.address = "not-hex".into();
+        assert_eq!(c.id(), 0, "an unparseable address must not panic");
     }
 
     #[test]

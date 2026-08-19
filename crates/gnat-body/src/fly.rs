@@ -191,7 +191,21 @@ impl Fly {
             z: 0.0,
             breath: 1.0,
             legs,
-            wings: [Wing::default(); 2],
+            // Folded flat over the abdomen, the resting pose. `land()` sets
+            // this too, but a fly that starts on the ground never lands, and
+            // an unposed wing is an invisible one.
+            wings: [
+                Wing {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -0.13,
+                },
+                Wing {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.13,
+                },
+            ],
             brain_live: false,
             live_arousal: 0.0,
             live_wing: 0.0,
