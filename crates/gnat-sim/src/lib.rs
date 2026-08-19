@@ -1,10 +1,12 @@
 //! Connectome simulation core. Pure computation: no Wayland, no Hyprland, no
-//! rendering. Everything here must build and test on any platform.
+//! rendering. Everything here builds and tests on any platform.
 
-pub mod connectome;
+pub mod circuit;
 pub mod lif;
-pub mod probe;
+pub mod rng;
+pub mod simtest;
 
-pub use connectome::{Connectome, Neuron, Role};
-pub use lif::{LifParams, Sim};
-pub use probe::RateProbe;
+pub use circuit::{Circuit, Neuron, Role, Side};
+pub use lif::{Groups, Inputs, Lif, Rates};
+pub use rng::Rng;
+pub use simtest::Report;

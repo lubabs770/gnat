@@ -17,10 +17,4 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - name: etl round-trips into the Rust loader
-        run: |
-          mkdir -p /tmp/raw
-          printf 'pre_root_id,post_root_id,syn_count,nt_type\n100,200,12,ach\n200,300,9,gaba\n' > /tmp/raw/connections.csv
-          printf 'root_id,super_class,cell_type\n100,sensory,LC4\n200,central,GF\n300,motor,DLM\n' > /tmp/raw/classification.csv
-          python3 etl/etl.py --data-dir /tmp/raw --out /tmp/tiny.gnat
-          cargo run -p gnat-sim --example dump -- /tmp/tiny.gnat
+      - run: cargo run --release -p gnat -- --simtest

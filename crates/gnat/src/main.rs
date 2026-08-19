@@ -7,6 +7,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--senses") => senses(),
+        Some("--simtest") => simtest(),
         Some("--version") | Some("-V") => {
             println!("gnat {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -29,10 +30,26 @@ fn usage() {
          \n\
          usage:\n\
          \x20 gnat --senses    dump one reading from every desktop sense\n\
+         \x20 gnat --simtest   headless circuit test; exits non-zero on failure\n\
          \n\
-         not wired up yet: the overlay, and the sim itself (see README).",
+         not wired up yet: the overlay and the fly body (see README).",
         env!("CARGO_PKG_VERSION")
     );
+}
+
+/// Where the connectome lives, relative to the repository root.
+const CIRCUIT: &str = "data/circuit.json";
+
+fn simtest() -> Result<()> {
+    let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
+    // A fixed seed, so a failure is reproducible; the upstream draws from the
+    // system RNG and cannot be replayed.
+    let report = gnat_sim::simtest::run(circuit, 0x_F1_1E);
+    println!("{report}");
+    if !report.passed() {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 fn senses() -> Result<()> {
