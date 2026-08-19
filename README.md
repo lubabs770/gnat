@@ -12,25 +12,30 @@ state machine.
 ## Status
 
 **It runs.** There is a fly on the screen, walking on your windows, startling
-when the cursor lunges at it, driven by 668 real neurons. Both of the original's
-ground-truth suites pass — the circuit invariants and all 17 end-to-end
-behaviour checks.
+when the cursor lunges at it, driven by 668 real neurons — and a brain window
+you can click to stimulate them. Both of the original's ground-truth suites
+pass: the circuit invariants and all 17 end-to-end behaviour checks.
 
 ```
-cargo run --release -p gnat                     # put a fly on the screen
+cargo run --release -p gnat             # put a fly on the screen
+cargo run --release -p gnat -- --brain  # the same, plus the brain window
 ```
 
 ```
-cargo test --workspace                          # 66 tests
-cargo run --release -p gnat -- --simtest        # circuit invariants, on real data
-cargo run --release -p gnat -- --behaviortest   # stimulate neurons, watch the body react
-cargo run --release -p gnat -- --snapshot f.png # headless render, plus a zoomed crop
-cargo run -p gnat -- --senses                   # one reading from every desktop sense
-cargo run -p gnat-senses --example probe        # live 20s dump of the whole sense layer
-cargo run --release -p gnat -- --overlay-test   # measure the click-through claim
+gnat pause | resume | toggle | scare | quit | status
+gnat waybar                             # one line of JSON for a bar module
 ```
 
-What is left is the brain view and a control surface.
+```
+cargo test --workspace                            # 88 tests
+cargo run --release -p gnat -- --simtest          # circuit invariants, on real data
+cargo run --release -p gnat -- --behaviortest     # stimulate neurons, watch the body react
+cargo run --release -p gnat -- --snapshot f.png   # headless render, plus a zoomed crop
+cargo run --release -p gnat -- --brainshot b.png  # headless render of the brain view
+cargo run -p gnat -- --senses                     # one reading from every desktop sense
+cargo run -p gnat-senses --example probe          # live 20s dump of the whole sense layer
+cargo run --release -p gnat -- --overlay-test     # measure the click-through claim
+```
 
 `--simtest` on this machine:
 
@@ -58,7 +63,7 @@ fires **4 ms** after an abrupt loom (bound is ~10 ms), walk-drive duty 26%
 | `gnat-body` | Behaviour states, gait, flight, ledges, sleep, and the 17-check behaviour suite. No OS dependencies. | **ported** |
 | `gnat-senses` | Hyprland IPC, window terrain, looming, thermal, clock, activity. | **working** |
 | `gnat-overlay` | The click-through `wlr-layer-shell` surface, and a software canvas. | **working** |
-| `gnat` | Coordinator, renderer, snapshot tool, minimal PNG writer. | **running** |
+| `gnat` | Coordinator, renderer, brain view, control socket, snapshot tools. | **running** |
 
 ## The overlay
 
@@ -257,6 +262,67 @@ Two things that snapshot caught, which no test would have:
   rotates the fly a quarter turn. Not subtle once you look: it turns the fly into
   a blob.
 
+## The brain view
+
+`--brain` opens a second window — an ordinary xdg-toplevel, not a layer surface,
+because unlike the fly it very much wants to be clicked. It draws all 23,210
+somas coloured by super class, the 668 simulated neurons brighter on top
+coloured by role, and a flash wherever something spikes. Click anywhere to
+stimulate the nearest cluster; it names what you hit.
+
+It is software 3D. The point cloud is accumulated additively into a float buffer
+and tone-mapped at the end, which needs no depth sorting — order-independent by
+construction, and it gives a point cloud the glow it wants anyway.
+
+The view runs on **its own thread and its own Wayland connection**, so a slow
+repaint there cannot stall the fly. It talks to the sim through two small
+channels: spikes out on a bounded `SpikeBus`, stimulation back in on a
+`StimQueue`. That is the original's arrangement too — its brain panel renders on
+the AppKit thread while the sim advances in the fly's render loop — and it is
+where the stim mutex I deferred in milestone 2 finally earns its keep.
+
+`--brainshot` renders it headlessly, driving a real loom so the shot has an
+actual giant-fibre volley in it rather than baseline crackle.
+
+There is no font on a raw pixel buffer, so `font.rs` is a 3x5 bitmap alphabet.
+Uppercase only: three pixels wide is the narrowest a letter can be and stay
+readable, and the labels are short.
+
+## The control surface
+
+The original hangs this off a menu-bar item. Wayland has no global menu bar, and
+a socket plus a CLI fits a tiling desktop better:
+
+```
+$ gnat status
+{"state":"flying","paused":false,"sleeping":false,"pop_hz":7.26,"neurons":668,"ledges":5}
+
+$ gnat scare      # a real 0.6 loom into the real circuit, then it decays
+ok
+
+$ gnat pause
+ok paused
+```
+
+`scare` is deliberately not a scripted takeoff. It raises the looming drive and
+lets the connectome decide, exactly like the original's "scare all" — so it can
+fail to produce an escape, which is the point.
+
+For Waybar:
+
+```jsonc
+"custom/gnat": {
+    "exec": "gnat waybar",
+    "return-type": "json",
+    "interval": 2,
+    "on-click": "gnat toggle",
+    "on-click-right": "gnat scare"
+}
+```
+
+The module degrades to an empty label when no fly is running, rather than
+filling the bar with errors.
+
 ## How the macOS senses map onto Wayland
 
 macOS handed DesktopFly permission-free access to the global cursor, every
@@ -271,7 +337,7 @@ different channels — and one piece is genuinely constrained.
 | Circadian rhythm | Wall clock | Wall clock | Identical. |
 | Machine temperature | Thermal-state enum | `/sys/class/hwmon` in °C | **Better.** Real numbers, not three buckets. |
 | Clicks as taps | Global event tap | — | **Lost.** Downgraded to window/focus events. |
-| Menu bar item | `NSStatusItem` | Waybar module or a control socket + CLI | Reworked. |
+| Menu bar item | `NSStatusItem` | Control socket + CLI + Waybar module | Reworked, and scriptable. |
 
 ### The cursor
 
@@ -305,11 +371,13 @@ decision, not an engineering gap.
 3. ~~Click-through layer-shell overlay, measured rather than asserted.~~ **Done.**
 4. ~~Fly body and gait, and all 17 `--behaviortest` checks.~~ **Done.**
 5. ~~Wire it together and draw the fly.~~ **Done.**
-6. **Brain view** — an ordinary xdg-toplevel, because it wants clicks. 23,210
-   point sprites and click-to-stimulate.
-7. Swap the software canvas for GL once the point cloud needs it.
-8. Control surface: a Waybar module or a socket plus `gnat pause` / `gnat add`.
+6. ~~Brain view: 23,210 point sprites, click-to-stimulate.~~ **Done.**
+7. ~~Control surface: a socket, a CLI, and a Waybar module.~~ **Done.**
+8. Swap the software canvas for GL if the point cloud ever needs it. It does
+   not yet — 24k points is nothing.
 9. Multi-output, and the extra brainless flies the original supports.
+10. Packaging: a systemd user unit, and `gnat --brain` as a toggle rather than a
+    launch flag.
 
 ## Data
 

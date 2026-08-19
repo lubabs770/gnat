@@ -3,10 +3,12 @@
 
 pub mod circuit;
 pub mod lif;
+pub mod points;
 pub mod rng;
 pub mod simtest;
 
 pub use circuit::{Circuit, Neuron, Role, Side};
 pub use lif::{Groups, Inputs, Lif, Rates};
+pub use points::{BrainPoints, Point};
 pub use rng::Rng;
 pub use simtest::Report;

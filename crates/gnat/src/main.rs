@@ -2,7 +2,10 @@
 //! renderer.
 
 mod app;
+mod brain;
+mod control;
 mod coord;
+mod font;
 mod overlay_test;
 mod png;
 mod render;
@@ -14,8 +17,19 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--senses") => senses(),
-        Some("--run") => run(),
+        Some("pause") | Some("resume") | Some("toggle") | Some("scare") | Some("quit")
+        | Some("status") => {
+            println!("{}", control::send(args[0].as_str())?);
+            Ok(())
+        }
+        Some("waybar") => {
+            println!("{}", control::waybar());
+            Ok(())
+        }
+        Some("--run") => run(false),
+        Some("--brain") => run(true),
         Some("--snapshot") => shot(&args),
+        Some("--brainshot") => brainshot(&args),
         Some("--simtest") => simtest(),
         Some("--behaviortest") => behaviortest(),
         Some("--overlay-test") => overlay_test::run(true),
@@ -29,7 +43,7 @@ fn main() -> Result<()> {
             usage();
             std::process::exit(2);
         }
-        None => run(),
+        None => run(false),
     }
 }
 
@@ -39,28 +53,40 @@ fn usage() {
          \n\
          usage:\n\
          \x20 gnat            put a fly on the screen (same as --run)\n\
+         \x20 gnat --brain    the same, plus the brain window\n\
+         \n\
+         \x20 gnat pause | resume | toggle | scare | quit | status\n\
+         \x20 gnat waybar     one line of JSON for a Waybar custom module\n\
          \x20 gnat --snapshot <file.png> [seconds]   headless render, plus a zoomed crop\n\
+         \x20 gnat --brainshot <file.png> [seconds]  headless render of the brain view\n\
          \x20 gnat --senses    dump one reading from every desktop sense\n\
          \x20 gnat --simtest   headless circuit test; exits non-zero on failure\n\
          \x20 gnat --behaviortest          stimulate neurons, watch the body react\n\
          \x20 gnat --overlay-test          prove the overlay passes clicks through\n\
          \x20 gnat --overlay-test-control  the same, with an input region, as a control\n\
          \n\
-         the brain view and the control surface are not wired up yet (see README).",
+         the brain view needs --brain; see README for what is still missing.",
         env!("CARGO_PKG_VERSION")
     );
 }
 
 /// Where the connectome lives, relative to the repository root.
 const CIRCUIT: &str = "data/circuit.json";
+/// The brain view's point cloud. Only loaded when the view is asked for.
+const POINTS: &str = "data/brain_points.json";
 
 /// A fixed seed, so a failure is reproducible. The original draws from the
 /// system RNG and cannot be replayed.
 const SEED: u64 = 0x_F1_1E;
 
-fn run() -> Result<()> {
+fn run(brain: bool) -> Result<()> {
     let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
-    app::run(circuit, SEED)
+    let points = if brain {
+        Some(gnat_sim::BrainPoints::load(POINTS)?)
+    } else {
+        None
+    };
+    app::run(circuit, points, SEED)
 }
 
 fn shot(args: &[String]) -> Result<()> {
@@ -70,6 +96,16 @@ fn shot(args: &[String]) -> Result<()> {
     let seconds = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2.0);
     let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
     snapshot::run(circuit, SEED, std::path::Path::new(path), seconds)
+}
+
+fn brainshot(args: &[String]) -> Result<()> {
+    let path = args
+        .get(1)
+        .context("usage: gnat --brainshot <file.png> [seconds]")?;
+    let seconds = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2.0);
+    let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
+    let points = gnat_sim::BrainPoints::load(POINTS)?;
+    snapshot::brainshot(circuit, points, SEED, std::path::Path::new(path), seconds)
 }
 
 fn simtest() -> Result<()> {

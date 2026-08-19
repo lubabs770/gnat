@@ -10,10 +10,13 @@ use anyhow::{Context, Result};
 use gnat_body::{Fly, Ledge as SceneLedge, SignalBuilder, Signals, circadian};
 use gnat_overlay::{Canvas, Config, Flow, Overlay};
 use gnat_senses::{Activity, Event, EventStream, Hypr, Thermal, ledges};
-use gnat_sim::{Circuit, Lif};
+use gnat_sim::{BrainPoints, Circuit, Lif};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::brain::{BrainData, SpikeBus, StimQueue};
+use crate::control::{self, Control};
 use crate::coord::Frame;
 use crate::render;
 
@@ -61,6 +64,15 @@ pub struct App {
 
     /// Set once the first configure has told us the real output size.
     frame: Frame,
+
+    /// Spikes out to the brain view, stimulation back in. Both are `None` when
+    /// no view is open, so nothing is paid for a window that is not there.
+    spikes: Option<Arc<SpikeBus>>,
+    stims: Option<Arc<StimQueue>>,
+
+    control: Control,
+    /// A deliberate scare, decaying like any other looming stimulus.
+    loom_override: f32,
 }
 
 impl App {
@@ -110,7 +122,24 @@ impl App {
             sleepy: false,
             circadian_activity: 1.0,
             frame,
+            spikes: None,
+            stims: None,
+            control: Control::default(),
+            loom_override: 0.0,
         })
+    }
+
+    /// The shared control state, for the socket server to read and write.
+    pub fn control(&self) -> Control {
+        self.control.clone()
+    }
+
+    /// Attach a brain view's channels. Turns on spike sampling, which is pure
+    /// overhead while nothing is drawing.
+    pub fn attach_brain(&mut self, spikes: Arc<SpikeBus>, stims: Arc<StimQueue>) {
+        self.sim.set_spike_logging(true);
+        self.spikes = Some(spikes);
+        self.stims = Some(stims);
     }
 
     /// The fly, for callers that need to look at it — the snapshot tool
@@ -143,6 +172,17 @@ impl App {
         let dt = (now - self.last_frame).as_secs_f32().clamp(0.0, 0.05);
         self.last_frame = now;
 
+        let paused = match self.take_commands() {
+            Some(flow) => return flow,
+            None => self.control.lock().unwrap().paused,
+        };
+        if paused {
+            // Keep drawing so the fly does not vanish, but stop time for it.
+            canvas.clear();
+            render::draw_fly(canvas, &self.fly, &self.frame);
+            return Flow::Continue;
+        }
+
         self.drain_events();
         self.poll_cursor();
         if now - self.last_terrain >= TERRAIN_INTERVAL {
@@ -162,7 +202,34 @@ impl App {
 
         canvas.clear();
         render::draw_fly(canvas, &self.fly, &self.frame);
+        self.publish_status();
         Flow::Continue
+    }
+
+    /// Apply anything the control socket asked for. Returns a flow when the
+    /// answer is "stop".
+    fn take_commands(&mut self) -> Option<Flow> {
+        let mut c = self.control.lock().unwrap();
+        if c.quit {
+            return Some(Flow::Exit);
+        }
+        if c.scare {
+            c.scare = false;
+            drop(c);
+            // The same magnitude the original's "scare all" uses: a real
+            // stimulus into the real circuit, not a scripted takeoff.
+            self.loom_override = 0.6;
+        }
+        None
+    }
+
+    fn publish_status(&self) {
+        let mut c = self.control.lock().unwrap();
+        c.state = format!("{:?}", self.fly.state).to_lowercase();
+        c.pop_hz = self.sim.rates().pop;
+        c.neurons = self.sim.len();
+        c.ledges = self.terrain.len();
+        c.sleeping = self.sleepy;
     }
 
     fn drain_events(&mut self) {
@@ -255,7 +322,7 @@ impl App {
             (approach / dist * 6.0).clamp(0.0, 1.0) * (1.0 - dist / 800.0).clamp(0.0, 1.0);
         // Hovering close counts too: a big stationary object is still a threat.
         loom += ((130.0 - dist) / 130.0).clamp(0.0, 1.0) * 0.5;
-        let loom = loom.clamp(0.0, 1.0);
+        let loom = (loom + self.loom_override).clamp(0.0, 1.0);
 
         // Split between the eyes by bearing relative to the fly's heading.
         let (sin, cos) = self.fly.heading.sin_cos();
@@ -278,11 +345,21 @@ impl App {
     }
 
     fn step_brain(&mut self, dt: f32) -> Signals {
+        // Clicks in the brain view arrive on its own thread; deliver them here,
+        // where the sim is actually owned.
+        if let Some(stims) = &self.stims {
+            for stim in stims.drain() {
+                self.sim
+                    .stimulate(&stim.neurons, stim.strength, stim.duration_ms);
+            }
+        }
+
         let (loom_l, loom_r, puff) = self.compute_loom(dt);
 
         let decay = (-4.0 * dt).exp();
         self.window_loom.0 *= decay;
         self.window_loom.1 *= decay;
+        self.loom_override = (self.loom_override - dt * 1.2).max(0.0);
 
         self.sim.inputs.loom_l = loom_l.max(self.window_loom.0);
         self.sim.inputs.loom_r = loom_r.max(self.window_loom.1);
@@ -303,6 +380,10 @@ impl App {
         let steps = (self.ms_accumulator as i64).min(MAX_STEPS_PER_FRAME);
         self.ms_accumulator -= steps as f64;
         self.sim.step(steps);
+
+        if let Some(bus) = &self.spikes {
+            bus.push(&self.sim.drain_spikes());
+        }
 
         Signals {
             tempo: self.tempo,
@@ -341,8 +422,25 @@ fn parse_utc_offset(raw: &str) -> Option<i32> {
     Some(sign * (hours * 3600 + minutes * 60))
 }
 
-pub fn run(circuit: Circuit, seed: u64) -> Result<()> {
-    let mut app = App::new(circuit, seed)?;
+pub fn run(circuit: Circuit, points: Option<BrainPoints>, seed: u64) -> Result<()> {
+    let mut app = App::new(circuit.clone(), seed)?;
+
+    // The brain view gets its own thread and its own Wayland connection, so a
+    // slow repaint there cannot stall the fly.
+    if let Some(points) = points {
+        let data = Arc::new(BrainData::new(&circuit, points));
+        let spikes = Arc::new(SpikeBus::default());
+        let stims = Arc::new(StimQueue::default());
+        app.attach_brain(spikes.clone(), stims.clone());
+        std::thread::spawn(move || {
+            if let Err(e) = crate::brain::run(data, spikes, stims) {
+                eprintln!("brain view: {e}");
+            }
+        });
+    }
+
+    control::serve(app.control());
+
     let mut overlay = Overlay::new(Config {
         namespace: "gnat".into(),
         ..Config::default()

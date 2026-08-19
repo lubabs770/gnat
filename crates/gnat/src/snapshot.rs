@@ -9,11 +9,12 @@
 
 use anyhow::Result;
 use gnat_overlay::Canvas;
-use gnat_sim::Circuit;
+use gnat_sim::{BrainPoints, Circuit, Lif};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::app::App;
+use crate::brain::{BrainData, SpikeBus, StimQueue, View};
 use crate::png;
 
 /// Frame rate the headless loop pretends to run at.
@@ -137,6 +138,56 @@ fn crop_and_zoom(rgba: &[u8], w: u32, h: u32, cx: i32, cy: i32) -> (u32, u32, Ve
         }
     }
     (out_side, out_side, out)
+}
+
+/// Render the brain view headlessly, with a real loom driving real spikes.
+///
+/// The original has `--brainshot` for the same reason: a point cloud is exactly
+/// the kind of thing that looks fine in code and wrong on screen.
+pub fn brainshot(
+    circuit: Circuit,
+    points: BrainPoints,
+    seed: u64,
+    path: &Path,
+    seconds: f32,
+) -> Result<()> {
+    let (w, h) = (760u32, 620u32);
+    let data = std::sync::Arc::new(BrainData::new(&circuit, points));
+    let bus = std::sync::Arc::new(SpikeBus::default());
+    let stims = std::sync::Arc::new(StimQueue::default());
+
+    let mut sim = Lif::new(circuit, seed);
+    sim.set_spike_logging(true);
+    // Settle, then drive an abrupt loom so the shot has a giant-fibre volley in
+    // it rather than only baseline crackle.
+    sim.step(400);
+    let _ = sim.consume_gf();
+
+    let frames = (seconds * 60.0).round() as u32;
+    let bus_for_sim = bus.clone();
+    let mut view = View::new(data.clone(), bus, stims);
+    let rgba = crate::brain::render_offscreen(&mut view, w, h, frames, |i| {
+        if i > frames / 3 {
+            sim.inputs.loom_l = 1.0;
+            sim.inputs.loom_r = 0.5;
+        }
+        sim.step(16);
+        bus_for_sim.push(&sim.drain_spikes());
+    });
+
+    // The brain view is opaque, so it only needs the alpha flattened.
+    let mut out = vec![0u8; rgba.len()];
+    for (o, p) in out.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+        o.copy_from_slice(&[p[2], p[1], p[0], 255]);
+    }
+    png::write_rgba(path, w, h, &out)?;
+    println!(
+        "neurons  {} simulated, {} in the cloud",
+        data.neurons.len(),
+        data.cloud.len()
+    );
+    println!("wrote    {}", path.display());
+    Ok(())
 }
 
 #[cfg(test)]
