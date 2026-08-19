@@ -1,0 +1,16 @@
+[package]
+name = "gnat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A fruit fly, simulated from its connectome, living on your desktop."
+
+[[bin]]
+name = "gnat"
+path = "src/main.rs"
+
+[dependencies]
+gnat-sim.workspace = true
+gnat-senses.workspace = true
+anyhow.workspace = true

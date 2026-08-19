@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/gnat-sim",
+    "crates/gnat-senses",
+    "crates/gnat-overlay",
+    "crates/gnat",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/lubabs770/gnat"
+
+[workspace.dependencies]
+gnat-sim = { path = "crates/gnat-sim" }
+gnat-senses = { path = "crates/gnat-senses" }
+gnat-overlay = { path = "crates/gnat-overlay" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

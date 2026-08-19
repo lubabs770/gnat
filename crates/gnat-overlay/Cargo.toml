@@ -1,0 +1,10 @@
+[package]
+name = "gnat-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A click-through wlr-layer-shell overlay surface for the fly to walk on."
+
+[dependencies]
+anyhow.workspace = true

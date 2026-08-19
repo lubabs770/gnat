@@ -1,0 +1,10 @@
+[package]
+name = "gnat-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Leaky integrate-and-fire simulation over a Drosophila connectome. No OS dependencies."
+
+[dependencies]
+anyhow.workspace = true

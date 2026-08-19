@@ -1,0 +1,12 @@
+[package]
+name = "gnat-senses"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Desktop senses: Hyprland IPC, cursor, thermal, activity."
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,5 @@
+/target
+*.gnat
+/data/raw/
+__pycache__/
+.venv/
