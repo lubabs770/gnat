@@ -18,7 +18,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("--senses") => senses(),
         Some("pause") | Some("resume") | Some("toggle") | Some("scare") | Some("quit")
-        | Some("status") => {
+        | Some("status") | Some("add") | Some("remove") | Some("brain") => {
             println!("{}", control::send(args[0].as_str())?);
             Ok(())
         }
@@ -26,8 +26,10 @@ fn main() -> Result<()> {
             println!("{}", control::waybar());
             Ok(())
         }
-        Some("--run") => run(false),
-        Some("--brain") => run(true),
+        Some("--run") => run(&args),
+        Some("--brain") => run(&args),
+        Some("--output") => run(&args),
+        Some("outputs") => outputs(),
         Some("--snapshot") => shot(&args),
         Some("--brainshot") => brainshot(&args),
         Some("--simtest") => simtest(),
@@ -43,7 +45,7 @@ fn main() -> Result<()> {
             usage();
             std::process::exit(2);
         }
-        None => run(false),
+        None => run(&args),
     }
 }
 
@@ -54,8 +56,12 @@ fn usage() {
          usage:\n\
          \x20 gnat            put a fly on the screen (same as --run)\n\
          \x20 gnat --brain    the same, plus the brain window\n\
+         \x20 gnat --output <NAME>       pin the overlay to one output (see: gnat outputs)\n\
          \n\
          \x20 gnat pause | resume | toggle | scare | quit | status\n\
+         \x20 gnat add | remove          add or remove a brainless extra fly\n\
+         \x20 gnat brain                 open the brain window on a running fly\n\
+         \x20 gnat outputs               list outputs\n\
          \x20 gnat waybar     one line of JSON for a Waybar custom module\n\
          \x20 gnat --snapshot <file.png> [seconds]   headless render, plus a zoomed crop\n\
          \x20 gnat --brainshot <file.png> [seconds]  headless render of the brain view\n\
@@ -79,14 +85,34 @@ const POINTS: &str = "data/brain_points.json";
 /// system RNG and cannot be replayed.
 const SEED: u64 = 0x_F1_1E;
 
-fn run(brain: bool) -> Result<()> {
+fn run(args: &[String]) -> Result<()> {
     let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
-    let points = if brain {
-        Some(gnat_sim::BrainPoints::load(POINTS)?)
-    } else {
-        None
-    };
-    app::run(circuit, points, SEED)
+    // `--output NAME` may appear on its own or after `--run` / `--brain`.
+    let output = args
+        .iter()
+        .position(|a| a == "--output")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+    app::run(
+        circuit,
+        SEED,
+        app::Options {
+            brain: args.iter().any(|a| a == "--brain"),
+            output,
+            points_path: Some(POINTS.into()),
+        },
+    )
+}
+
+/// List the outputs `--output` will accept.
+fn outputs() -> Result<()> {
+    for m in gnat_senses::Hypr::connect()?.monitors()? {
+        println!(
+            "{:<12} {}x{} @{:.0} at {},{} scale {}",
+            m.name, m.width, m.height, m.refresh_rate, m.x, m.y, m.scale
+        );
+    }
+    Ok(())
 }
 
 fn shot(args: &[String]) -> Result<()> {

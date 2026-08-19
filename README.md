@@ -23,6 +23,9 @@ cargo run --release -p gnat -- --brain  # the same, plus the brain window
 
 ```
 gnat pause | resume | toggle | scare | quit | status
+gnat add | remove                       # extra brainless flies
+gnat brain                              # open the brain window on a running fly
+gnat outputs                            # list outputs for --output
 gnat waybar                             # one line of JSON for a bar module
 ```
 
@@ -288,6 +291,17 @@ There is no font on a raw pixel buffer, so `font.rs` is a 3x5 bitmap alphabet.
 Uppercase only: three pixels wide is the narrowest a letter can be and stay
 readable, and the labels are short.
 
+## More than one fly
+
+`gnat add` puts another fly on the screen; `gnat remove` takes one away. Only
+the **first** fly is wired to the connectome — the rest run the original's
+legacy distance-based fear, which is what it does too. One brain is plenty, and
+six would be six times the work for no extra behaviour. `remove` will not take
+the first one, because it is the one carrying the brain.
+
+`gnat scare` reflects that split honestly: it raises the looming drive for the
+fly that has a connectome and lets it decide, and simply launches the others.
+
 ## The control surface
 
 The original hangs this off a menu-bar item. Wayland has no global menu bar, and
@@ -321,7 +335,36 @@ For Waybar:
 ```
 
 The module degrades to an empty label when no fly is running, rather than
-filling the bar with errors.
+filling the bar with errors, and shows a count once there is more than one fly:
+`grooming x3`.
+
+Ready-made copies of both live in [`packaging/`](packaging), along with a
+systemd user unit:
+
+```
+cp packaging/gnat.service ~/.config/systemd/user/
+systemctl --user enable --now gnat
+```
+
+## Outputs
+
+`gnat outputs` lists them; `gnat --output HDMI-A-2` pins the overlay to one.
+
+Output *names* arrive as Wayland events rather than as registry globals, so they
+cannot be matched until the registry has been pumped — the first version of
+`--output` never matched anything for exactly that reason. Resolution now
+happens on a throwaway event queue before the real surface is built, and an
+unknown name says what it did find:
+
+```
+$ gnat --output NOPE-1
+Error: no output named NOPE-1; this compositor reports ["HDMI-A-2"]
+```
+
+Spanning *all* outputs at once — one layer surface per monitor, the fly walking
+between screens — is **not** done. It needs multi-surface support on one
+connection, and this machine has a single monitor, so it would be untested code.
+Written down rather than guessed at.
 
 ## How the macOS senses map onto Wayland
 
@@ -373,11 +416,13 @@ decision, not an engineering gap.
 5. ~~Wire it together and draw the fly.~~ **Done.**
 6. ~~Brain view: 23,210 point sprites, click-to-stimulate.~~ **Done.**
 7. ~~Control surface: a socket, a CLI, and a Waybar module.~~ **Done.**
-8. Swap the software canvas for GL if the point cloud ever needs it. It does
-   not yet — 24k points is nothing.
-9. Multi-output, and the extra brainless flies the original supports.
-10. Packaging: a systemd user unit, and `gnat --brain` as a toggle rather than a
-    launch flag.
+8. ~~Extra flies, output selection, a runtime brain toggle, packaging.~~ **Done.**
+9. **Multi-monitor spanning** — one layer surface per output. Needs multi-surface
+   support on a single connection, and a second monitor to test against.
+10. Swap the software canvas for GL if the point cloud ever needs it. It does
+    not yet: 24k points is nothing.
+11. The original's remaining extras — `--behaviortest` has a sibling suite of
+    render snapshots upstream that this port does not have.
 
 ## Data
 

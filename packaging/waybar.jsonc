@@ -1,0 +1,15 @@
+// A Waybar custom module for the fly. Drop into the "modules-*" list and merge
+// the block below into your Waybar config.
+//
+// The module goes quiet rather than erroring when no fly is running, so it is
+// safe to leave in the bar permanently.
+{
+    "custom/gnat": {
+        "exec": "gnat waybar",
+        "return-type": "json",
+        "interval": 2,
+        "on-click": "gnat toggle",
+        "on-click-right": "gnat scare",
+        "on-click-middle": "gnat brain"
+    }
+}

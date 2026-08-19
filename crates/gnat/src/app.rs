@@ -11,6 +11,7 @@ use gnat_body::{Fly, Ledge as SceneLedge, SignalBuilder, Signals, circadian};
 use gnat_overlay::{Canvas, Config, Flow, Overlay};
 use gnat_senses::{Activity, Event, EventStream, Hypr, Thermal, ledges};
 use gnat_sim::{BrainPoints, Circuit, Lif};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime};
@@ -39,10 +40,18 @@ const TEMPO_HOT: f32 = 1.5;
 
 pub struct App {
     hypr: Hypr,
+    /// Kept so the brain view can be opened later without re-reading the file.
+    circuit: Circuit,
     events: Receiver<Event>,
     sim: Lif,
     builder: SignalBuilder,
-    fly: Fly,
+    /// The first fly is the one wired to the connectome. Any others run on the
+    /// original's legacy distance-based fear, which is what it does too — one
+    /// brain is plenty, and six of them would be six times the work for no
+    /// extra behaviour.
+    flies: Vec<Fly>,
+    /// Seeds the next fly, so added flies do not all wander identically.
+    next_seed: u64,
     thermal: Thermal,
     activity: Activity,
     utc_offset_secs: i32,
@@ -73,6 +82,9 @@ pub struct App {
     control: Control,
     /// A deliberate scare, decaying like any other looming stimulus.
     loom_override: f32,
+    /// Where the point cloud lives, read only when a view is first opened.
+    points_path: PathBuf,
+    brain_open: bool,
 }
 
 impl App {
@@ -102,10 +114,12 @@ impl App {
 
         Ok(Self {
             hypr,
+            circuit: circuit.clone(),
             events,
             sim: Lif::new(circuit, seed),
             builder: SignalBuilder::new(),
-            fly,
+            flies: vec![fly],
+            next_seed: seed.wrapping_add(1),
             thermal: Thermal::discover(),
             activity: Activity::new(Duration::from_secs(600)),
             utc_offset_secs: local_utc_offset(),
@@ -126,6 +140,8 @@ impl App {
             stims: None,
             control: Control::default(),
             loom_override: 0.0,
+            points_path: PathBuf::from("data/brain_points.json"),
+            brain_open: false,
         })
     }
 
@@ -134,18 +150,57 @@ impl App {
         self.control.clone()
     }
 
-    /// Attach a brain view's channels. Turns on spike sampling, which is pure
-    /// overhead while nothing is drawing.
-    pub fn attach_brain(&mut self, spikes: Arc<SpikeBus>, stims: Arc<StimQueue>) {
-        self.sim.set_spike_logging(true);
-        self.spikes = Some(spikes);
-        self.stims = Some(stims);
+    /// Where the point cloud is read from when a brain view opens.
+    pub fn set_points_path(&mut self, path: PathBuf) {
+        self.points_path = path;
     }
 
-    /// The fly, for callers that need to look at it — the snapshot tool
-    /// centres its crop on wherever it currently is.
+    /// Open the brain view, on its own thread and its own Wayland connection so
+    /// a slow repaint there cannot stall the fly.
+    ///
+    /// Spike sampling is switched on here rather than always, because it is
+    /// pure overhead while nothing is drawing.
+    pub fn open_brain(&mut self) -> Result<()> {
+        if self.brain_open {
+            return Ok(());
+        }
+        let points = BrainPoints::load(&self.points_path)?;
+        let data = Arc::new(BrainData::new(&self.circuit, points));
+        let spikes = Arc::new(SpikeBus::default());
+        let stims = Arc::new(StimQueue::default());
+
+        self.sim.set_spike_logging(true);
+        self.spikes = Some(spikes.clone());
+        self.stims = Some(stims.clone());
+        self.brain_open = true;
+
+        std::thread::spawn(move || {
+            if let Err(e) = crate::brain::run(data, spikes, stims) {
+                eprintln!("brain view: {e}");
+            }
+        });
+        Ok(())
+    }
+
+    /// The fly with the brain, for callers that need to look at it — the
+    /// snapshot tool centres its crop on wherever it currently is.
     pub fn fly(&self) -> &Fly {
-        &self.fly
+        &self.flies[0]
+    }
+
+    pub fn fly_count(&self) -> usize {
+        self.flies.len()
+    }
+
+    /// Add a brainless fly somewhere in the middle of the output.
+    fn add_fly(&mut self) {
+        let mut rng = gnat_sim::Rng::new(self.next_seed);
+        self.next_seed = self.next_seed.wrapping_add(1);
+        let hw = self.frame.width / 2.0 - 100.0;
+        let hh = self.frame.height / 2.0 - 100.0;
+        let mut fly = Fly::new((0.0, 0.0), self.next_seed);
+        fly.pos = (rng.range(-hw, hw), rng.range(-hh, hh));
+        self.flies.push(fly);
     }
 
     /// The current output frame.
@@ -177,9 +232,11 @@ impl App {
             None => self.control.lock().unwrap().paused,
         };
         if paused {
-            // Keep drawing so the fly does not vanish, but stop time for it.
+            // Keep drawing so the flies do not vanish, but stop time for them.
             canvas.clear();
-            render::draw_fly(canvas, &self.fly, &self.frame);
+            for fly in &self.flies {
+                render::draw_fly(canvas, fly, &self.frame);
+            }
             return Flow::Continue;
         }
 
@@ -196,12 +253,18 @@ impl App {
         self.activity.tick(Duration::from_secs_f32(dt));
 
         let signals = self.step_brain(dt);
-        self.fly.terrain = self.terrain.clone();
-        self.fly
-            .update(dt, self.frame.bounds(), self.mouse, Some(signals));
+        let bounds = self.frame.bounds();
+        for (i, fly) in self.flies.iter_mut().enumerate() {
+            fly.terrain = self.terrain.clone();
+            // Only the first fly is driven by the connectome.
+            let s = if i == 0 { Some(signals) } else { None };
+            fly.update(dt, bounds, self.mouse, s);
+        }
 
         canvas.clear();
-        render::draw_fly(canvas, &self.fly, &self.frame);
+        for fly in &self.flies {
+            render::draw_fly(canvas, fly, &self.frame);
+        }
         self.publish_status();
         Flow::Continue
     }
@@ -213,23 +276,48 @@ impl App {
         if c.quit {
             return Some(Flow::Exit);
         }
-        if c.scare {
-            c.scare = false;
-            drop(c);
+        let open_brain = std::mem::take(&mut c.open_brain);
+        let add = std::mem::take(&mut c.add_flies);
+        let remove = std::mem::take(&mut c.remove_flies);
+        let scare = std::mem::take(&mut c.scare);
+        drop(c);
+
+        if scare {
             // The same magnitude the original's "scare all" uses: a real
-            // stimulus into the real circuit, not a scripted takeoff.
+            // stimulus into the real circuit for the fly that has one, and a
+            // plain takeoff for the rest.
             self.loom_override = 0.6;
+            let bounds = self.frame.bounds();
+            for fly in self.flies.iter_mut().skip(1) {
+                if fly.state != gnat_body::State::Flying {
+                    fly.start_flight(bounds, None, false, None);
+                }
+            }
+        }
+        for _ in 0..add {
+            self.add_fly();
+        }
+        if open_brain && let Err(e) = self.open_brain() {
+            eprintln!("brain view: {e}");
+        }
+        for _ in 0..remove {
+            // Never the first: it is the one carrying the brain.
+            if self.flies.len() > 1 {
+                self.flies.pop();
+            }
         }
         None
     }
 
     fn publish_status(&self) {
         let mut c = self.control.lock().unwrap();
-        c.state = format!("{:?}", self.fly.state).to_lowercase();
+        c.state = format!("{:?}", self.flies[0].state).to_lowercase();
         c.pop_hz = self.sim.rates().pop;
         c.neurons = self.sim.len();
         c.ledges = self.terrain.len();
         c.sleeping = self.sleepy;
+        c.flies = self.flies.len();
+        c.brain = self.brain_open;
     }
 
     fn drain_events(&mut self) {
@@ -314,7 +402,8 @@ impl App {
         }
         self.prev_mouse = Some(m);
 
-        let rel = (m.0 - self.fly.pos.0, m.1 - self.fly.pos.1);
+        let fly = &self.flies[0];
+        let rel = (m.0 - fly.pos.0, m.1 - fly.pos.1);
         let dist = (rel.0 * rel.0 + rel.1 * rel.1).sqrt().max(20.0);
         // Radial approach speed; positive means the cursor is closing in.
         let approach = -(rel.0 * self.mouse_vel.0 + rel.1 * self.mouse_vel.1) / dist;
@@ -325,7 +414,7 @@ impl App {
         let loom = (loom + self.loom_override).clamp(0.0, 1.0);
 
         // Split between the eyes by bearing relative to the fly's heading.
-        let (sin, cos) = self.fly.heading.sin_cos();
+        let (sin, cos) = fly.heading.sin_cos();
         let rd = (rel.0 / dist, rel.1 / dist);
         let cross_z = cos * rd.1 - sin * rd.0; // positive: threat on the left
         let lw = (0.5 + 0.5 * cross_z).clamp(0.12, 1.0);
@@ -365,8 +454,8 @@ impl App {
         self.sim.inputs.loom_r = loom_r.max(self.window_loom.1);
         self.sim.inputs.air_puff = puff.max(self.activity.vibration() * 0.30);
         // Body back into brain: leg proprioception from the current gait.
-        self.sim.inputs.gait_drive = self.fly.walking_intensity();
-        self.sim.inputs.gait_phase = self.fly.gait_phase();
+        self.sim.inputs.gait_drive = self.flies[0].walking_intensity();
+        self.sim.inputs.gait_phase = self.flies[0].gait_phase();
         // Circadian and sleep neuromodulation, compressed toward 1. The LIF
         // neurons sit just below threshold, so a raw multiplier silences them
         // outright: a siesta should mean "less active", not comatose.
@@ -422,27 +511,30 @@ fn parse_utc_offset(raw: &str) -> Option<i32> {
     Some(sign * (hours * 3600 + minutes * 60))
 }
 
-pub fn run(circuit: Circuit, points: Option<BrainPoints>, seed: u64) -> Result<()> {
-    let mut app = App::new(circuit.clone(), seed)?;
+/// How the fly should be started.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// Open the brain view immediately, rather than waiting for `gnat brain`.
+    pub brain: bool,
+    /// Pin the overlay to one output by name. `None` lets the compositor pick,
+    /// which is what a single-monitor setup wants.
+    pub output: Option<String>,
+    pub points_path: Option<PathBuf>,
+}
 
-    // The brain view gets its own thread and its own Wayland connection, so a
-    // slow repaint there cannot stall the fly.
-    if let Some(points) = points {
-        let data = Arc::new(BrainData::new(&circuit, points));
-        let spikes = Arc::new(SpikeBus::default());
-        let stims = Arc::new(StimQueue::default());
-        app.attach_brain(spikes.clone(), stims.clone());
-        std::thread::spawn(move || {
-            if let Err(e) = crate::brain::run(data, spikes, stims) {
-                eprintln!("brain view: {e}");
-            }
-        });
+pub fn run(circuit: Circuit, seed: u64, options: Options) -> Result<()> {
+    let mut app = App::new(circuit, seed)?;
+    if let Some(path) = options.points_path {
+        app.set_points_path(path);
     }
-
+    if options.brain {
+        app.open_brain()?;
+    }
     control::serve(app.control());
 
     let mut overlay = Overlay::new(Config {
         namespace: "gnat".into(),
+        output: options.output,
         ..Config::default()
     })?;
     overlay.run(move |canvas| app.frame(canvas))

@@ -63,6 +63,59 @@ impl Default for Config {
 }
 
 /// A live layer-shell overlay.
+/// Pumps the registry far enough to learn what the outputs are called.
+struct OutputProbe {
+    registry_state: RegistryState,
+    output_state: OutputState,
+}
+
+impl OutputHandler for OutputProbe {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.output_state
+    }
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+}
+
+impl ProvidesRegistryState for OutputProbe {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry_state
+    }
+    registry_handlers![OutputState];
+}
+
+delegate_registry!(OutputProbe);
+smithay_client_toolkit::delegate_dispatch2!(OutputProbe);
+
+/// Find an output by name, e.g. `HDMI-A-2`.
+///
+/// Proxies belong to the connection rather than to a queue, so an output found
+/// here is perfectly usable by the real surface afterwards.
+fn find_output(conn: &Connection, name: &str) -> Result<wl_output::WlOutput> {
+    let (globals, mut queue) =
+        registry_queue_init::<OutputProbe>(conn).context("initialising an output probe")?;
+    let qh = queue.handle();
+    let mut probe = OutputProbe {
+        registry_state: RegistryState::new(&globals),
+        output_state: OutputState::new(&globals, &qh),
+    };
+    // The first roundtrip delivers the wl_output globals; the second delivers
+    // the name and mode events that describe them.
+    queue.roundtrip(&mut probe)?;
+    queue.roundtrip(&mut probe)?;
+
+    let mut seen = Vec::new();
+    for output in probe.output_state.outputs() {
+        match probe.output_state.info(&output).and_then(|i| i.name) {
+            Some(n) if n == name => return Ok(output),
+            Some(n) => seen.push(n),
+            None => {}
+        }
+    }
+    anyhow::bail!("no output named {name}; this compositor reports {seen:?}")
+}
+
 pub struct Overlay {
     conn: Connection,
     queue: wayland_client::EventQueue<State>,
@@ -82,18 +135,11 @@ impl Overlay {
         let shm = Shm::bind(&globals, &qh).context("wl_shm is not available")?;
         let output_state = OutputState::new(&globals, &qh);
 
+        // Output names arrive as events, not as globals, so the registry has to
+        // be pumped before any of them can be matched. Doing that on a throwaway
+        // queue keeps the main state's construction in one piece.
         let output = match &config.output {
-            Some(name) => Some(
-                output_state
-                    .outputs()
-                    .find(|o| {
-                        output_state
-                            .info(o)
-                            .and_then(|i| i.name)
-                            .is_some_and(|n| &n == name)
-                    })
-                    .with_context(|| format!("no output named {name}"))?,
-            ),
+            Some(name) => Some(find_output(&conn, name)?),
             None => None,
         };
 

@@ -57,9 +57,10 @@ pub fn run(circuit: Circuit, seed: u64, path: &Path, seconds: f32) -> Result<()>
     png::write_rgba(&zoom_path, zw, zh, &zoomed)?;
 
     let terrain = app.terrain().len();
+    let flies = app.fly_count();
 
     let fly = app.fly();
-    println!("state    {:?}", fly.state);
+    println!("state    {:?}  ({flies} fly/flies)", fly.state);
     println!(
         "position {:.0},{:.0} on screen  (alt {:.2})",
         fx, fy, fly.alt

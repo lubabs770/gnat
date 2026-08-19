@@ -1,0 +1,31 @@
+# A systemd user unit for the fly.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/gnat.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gnat
+#
+# WorkingDirectory matters: gnat reads data/circuit.json relative to it. Point
+# it at wherever the repository lives.
+
+[Unit]
+Description=gnat - a connectome-simulated fruit fly on the desktop
+Documentation=https://github.com/lubabs770/gnat
+# Hyprland sets graphical-session.target once the compositor is up; without
+# this the fly would start before there is a display to draw on.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/gnat
+ExecStart=%h/gnat/target/release/gnat --run
+ExecReload=/bin/kill -HUP $MAINPID
+# The compositor restarting takes the fly with it; come back rather than
+# staying dead until the next login.
+Restart=on-failure
+RestartSec=3
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target

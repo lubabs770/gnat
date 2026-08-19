@@ -27,6 +27,13 @@ pub struct Shared {
     pub neurons: usize,
     pub ledges: usize,
     pub sleeping: bool,
+    pub flies: usize,
+    pub brain: bool,
+    /// A request to open the brain view, consumed by the next frame.
+    pub open_brain: bool,
+    /// Flies asked for and not yet created, and the same in reverse.
+    pub add_flies: u32,
+    pub remove_flies: u32,
 }
 
 impl Default for Shared {
@@ -40,6 +47,11 @@ impl Default for Shared {
             neurons: 0,
             ledges: 0,
             sleeping: false,
+            flies: 1,
+            brain: false,
+            open_brain: false,
+            add_flies: 0,
+            remove_flies: 0,
         }
     }
 }
@@ -100,6 +112,22 @@ fn handle(stream: UnixStream, control: &Control) -> Result<()> {
                 c.scare = true;
                 "ok".to_string()
             }
+            "brain" => {
+                if c.brain {
+                    "ok already open".to_string()
+                } else {
+                    c.open_brain = true;
+                    "ok".to_string()
+                }
+            }
+            "add" => {
+                c.add_flies += 1;
+                "ok".to_string()
+            }
+            "remove" => {
+                c.remove_flies += 1;
+                "ok".to_string()
+            }
             "quit" => {
                 c.quit = true;
                 "ok".to_string()
@@ -116,8 +144,8 @@ fn handle(stream: UnixStream, control: &Control) -> Result<()> {
 
 fn status_json(s: &Shared) -> String {
     format!(
-        r#"{{"state":"{}","paused":{},"sleeping":{},"pop_hz":{:.2},"neurons":{},"ledges":{}}}"#,
-        s.state, s.paused, s.sleeping, s.pop_hz, s.neurons, s.ledges
+        r#"{{"state":"{}","paused":{},"sleeping":{},"pop_hz":{:.2},"neurons":{},"ledges":{},"flies":{},"brain":{}}}"#,
+        s.state, s.paused, s.sleeping, s.pop_hz, s.neurons, s.ledges, s.flies, s.brain
     )
 }
 
@@ -150,6 +178,7 @@ pub fn waybar() -> String {
     };
 
     let state = get("state").unwrap_or_else(|| "?".into());
+    let flies: usize = get("flies").and_then(|f| f.parse().ok()).unwrap_or(1);
     let paused = get("paused").as_deref() == Some("true");
     let sleeping = get("sleeping").as_deref() == Some("true");
     let pop = get("pop_hz").unwrap_or_else(|| "0".into());
@@ -161,7 +190,16 @@ pub fn waybar() -> String {
     } else {
         (state.as_str(), "running")
     };
-    format!(r#"{{"text":"{icon}","tooltip":"gnat: {state}, {pop} Hz/neuron","class":"{class}"}}"#)
+    // Only show a count when there is more than one, so the common case stays
+    // a single short word.
+    let count = if flies > 1 {
+        format!(" x{flies}")
+    } else {
+        String::new()
+    };
+    format!(
+        r#"{{"text":"{icon}{count}","tooltip":"gnat: {state}, {pop} Hz/neuron, {flies} flies","class":"{class}"}}"#
+    )
 }
 
 #[cfg(test)]
@@ -225,6 +263,19 @@ mod tests {
         assert!(!control.lock().unwrap().paused);
         assert_eq!(send("scare").unwrap(), "ok");
         assert!(control.lock().unwrap().scare);
+        assert_eq!(send("brain").unwrap(), "ok");
+        assert!(control.lock().unwrap().open_brain);
+        assert_eq!(send("add").unwrap(), "ok");
+        assert_eq!(send("add").unwrap(), "ok");
+        assert_eq!(send("remove").unwrap(), "ok");
+        {
+            let c = control.lock().unwrap();
+            assert_eq!(
+                (c.add_flies, c.remove_flies),
+                (2, 1),
+                "requests should queue"
+            );
+        }
 
         let status = send("status").unwrap();
         assert!(status.contains(r#""neurons":668"#), "{status}");
