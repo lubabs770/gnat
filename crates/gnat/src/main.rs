@@ -22,6 +22,11 @@ fn main() -> Result<()> {
             println!("{}", control::send(args[0].as_str())?);
             Ok(())
         }
+        // `flies` takes an optional count, so it is sent as a whole line.
+        Some("flies") => {
+            println!("{}", control::send(&args.join(" "))?);
+            Ok(())
+        }
         Some("waybar") => {
             println!("{}", control::waybar());
             Ok(())
@@ -56,10 +61,12 @@ fn usage() {
          usage:\n\
          \x20 gnat            put a fly on the screen (same as --run)\n\
          \x20 gnat --brain    the same, plus the brain window\n\
+         \x20 gnat --flies <N>           start with N flies (the first has the brain)\n\
          \x20 gnat --output <NAME>       pin the overlay to one output (see: gnat outputs)\n\
          \n\
          \x20 gnat pause | resume | toggle | scare | quit | status\n\
-         \x20 gnat add | remove          add or remove a brainless extra fly\n\
+         \x20 gnat flies [N]             set the number of flies, or report it\n\
+         \x20 gnat add | remove          add or remove one brainless extra fly\n\
          \x20 gnat brain                 open the brain window on a running fly\n\
          \x20 gnat outputs               list outputs\n\
          \x20 gnat waybar     one line of JSON for a Waybar custom module\n\
@@ -98,6 +105,12 @@ fn run(args: &[String]) -> Result<()> {
         SEED,
         app::Options {
             brain: args.iter().any(|a| a == "--brain"),
+            flies: args
+                .iter()
+                .position(|a| a == "--flies")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(1),
             output,
             points_path: Some(POINTS.into()),
         },

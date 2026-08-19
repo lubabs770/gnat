@@ -17,13 +17,15 @@ you can click to stimulate them. Both of the original's ground-truth suites
 pass: the circuit invariants and all 17 end-to-end behaviour checks.
 
 ```
-cargo run --release -p gnat             # put a fly on the screen
-cargo run --release -p gnat -- --brain  # the same, plus the brain window
+cargo run --release -p gnat                  # put a fly on the screen
+cargo run --release -p gnat -- --brain       # the same, plus the brain window
+cargo run --release -p gnat -- --flies 8     # start with eight of them
 ```
 
 ```
 gnat pause | resume | toggle | scare | quit | status
-gnat add | remove                       # extra brainless flies
+gnat flies 8                            # set how many flies there are
+gnat add | remove                       # nudge that by one
 gnat brain                              # open the brain window on a running fly
 gnat outputs                            # list outputs for --output
 gnat waybar                             # one line of JSON for a bar module
@@ -293,8 +295,13 @@ readable, and the labels are short.
 
 ## More than one fly
 
-`gnat add` puts another fly on the screen; `gnat remove` takes one away. Only
-the **first** fly is wired to the connectome — the rest run the original's
+`gnat flies N` sets how many there are — usually what you actually want, since
+the answer is "four", not "three more than whatever is there now". `--flies N`
+does the same at startup, and `gnat add` / `gnat remove` nudge by one. `gnat
+flies` with no number just reports the count. The ceiling is 64, so a typo
+cannot spawn a thousand.
+
+Only the **first** fly is wired to the connectome — the rest run the original's
 legacy distance-based fear, which is what it does too. One brain is plenty, and
 six would be six times the work for no extra behaviour. `remove` will not take
 the first one, because it is the one carrying the brain.

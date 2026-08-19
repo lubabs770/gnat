@@ -192,8 +192,16 @@ impl App {
         self.flies.len()
     }
 
+    /// Take away the most recently added fly. Never the first: it is the one
+    /// carrying the brain.
+    fn remove_fly(&mut self) {
+        if self.flies.len() > 1 {
+            self.flies.pop();
+        }
+    }
+
     /// Add a brainless fly somewhere in the middle of the output.
-    fn add_fly(&mut self) {
+    pub fn add_fly(&mut self) {
         let mut rng = gnat_sim::Rng::new(self.next_seed);
         self.next_seed = self.next_seed.wrapping_add(1);
         let hw = self.frame.width / 2.0 - 100.0;
@@ -279,6 +287,7 @@ impl App {
         let open_brain = std::mem::take(&mut c.open_brain);
         let add = std::mem::take(&mut c.add_flies);
         let remove = std::mem::take(&mut c.remove_flies);
+        let target = c.target_flies.take();
         let scare = std::mem::take(&mut c.scare);
         drop(c);
 
@@ -301,9 +310,17 @@ impl App {
             eprintln!("brain view: {e}");
         }
         for _ in 0..remove {
-            // Never the first: it is the one carrying the brain.
-            if self.flies.len() > 1 {
-                self.flies.pop();
+            self.remove_fly();
+        }
+        // An absolute count wins over the relative nudges, since it is the more
+        // specific instruction.
+        if let Some(target) = target {
+            let target = target.clamp(1, control::MAX_FLIES);
+            while self.flies.len() < target {
+                self.add_fly();
+            }
+            while self.flies.len() > target {
+                self.remove_fly();
             }
         }
         None
@@ -516,6 +533,8 @@ fn parse_utc_offset(raw: &str) -> Option<i32> {
 pub struct Options {
     /// Open the brain view immediately, rather than waiting for `gnat brain`.
     pub brain: bool,
+    /// How many flies to start with. The first has the connectome.
+    pub flies: usize,
     /// Pin the overlay to one output by name. `None` lets the compositor pick,
     /// which is what a single-monitor setup wants.
     pub output: Option<String>,
@@ -526,6 +545,9 @@ pub fn run(circuit: Circuit, seed: u64, options: Options) -> Result<()> {
     let mut app = App::new(circuit, seed)?;
     if let Some(path) = options.points_path {
         app.set_points_path(path);
+    }
+    for _ in 1..options.flies.clamp(1, control::MAX_FLIES) {
+        app.add_fly();
     }
     if options.brain {
         app.open_brain()?;

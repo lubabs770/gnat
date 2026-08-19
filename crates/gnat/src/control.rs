@@ -34,6 +34,8 @@ pub struct Shared {
     /// Flies asked for and not yet created, and the same in reverse.
     pub add_flies: u32,
     pub remove_flies: u32,
+    /// An absolute count to reconcile to, from `gnat flies N`.
+    pub target_flies: Option<usize>,
 }
 
 impl Default for Shared {
@@ -52,11 +54,16 @@ impl Default for Shared {
             open_brain: false,
             add_flies: 0,
             remove_flies: 0,
+            target_flies: None,
         }
     }
 }
 
 pub type Control = Arc<Mutex<Shared>>;
+
+/// An upper bound on flies. Each one is cheap, but a typo should not spawn a
+/// thousand of them.
+pub const MAX_FLIES: usize = 64;
 
 pub fn socket_path() -> PathBuf {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
@@ -120,6 +127,19 @@ fn handle(stream: UnixStream, control: &Control) -> Result<()> {
                     "ok".to_string()
                 }
             }
+            // `flies N` sets an absolute count, which is what you want when
+            // the answer is "four", not "three more than whatever is there".
+            cmd if cmd.starts_with("flies") => match cmd.split_whitespace().nth(1) {
+                Some(n) => match n.parse::<usize>() {
+                    Ok(n) if (1..=MAX_FLIES).contains(&n) => {
+                        c.target_flies = Some(n);
+                        format!("ok {n}")
+                    }
+                    Ok(n) => format!("error {n} is outside 1..={MAX_FLIES}"),
+                    Err(_) => format!("error {n:?} is not a number"),
+                },
+                None => format!("ok {}", c.flies),
+            },
             "add" => {
                 c.add_flies += 1;
                 "ok".to_string()
@@ -263,6 +283,14 @@ mod tests {
         assert!(!control.lock().unwrap().paused);
         assert_eq!(send("scare").unwrap(), "ok");
         assert!(control.lock().unwrap().scare);
+        assert_eq!(send("flies 4").unwrap(), "ok 4");
+        assert_eq!(control.lock().unwrap().target_flies, Some(4));
+        assert!(send("flies 0").unwrap().starts_with("error"));
+        assert!(send("flies 9999").unwrap().starts_with("error"));
+        assert!(send("flies wasp").unwrap().starts_with("error"));
+        // A bare `flies` reports rather than sets.
+        assert_eq!(send("flies").unwrap(), "ok 1");
+
         assert_eq!(send("brain").unwrap(), "ok");
         assert!(control.lock().unwrap().open_brain);
         assert_eq!(send("add").unwrap(), "ok");
