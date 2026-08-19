@@ -75,7 +75,13 @@ pub fn socket_path() -> PathBuf {
 /// Returns without a listener rather than failing the whole program: a fly you
 /// cannot pause is better than no fly.
 pub fn serve(control: Control) {
-    let path = socket_path();
+    serve_at(socket_path(), control)
+}
+
+/// Bind a specific path. Split out so tests can use a private socket instead of
+/// reaching for `XDG_RUNTIME_DIR`, which is process-global and would race every
+/// other test in the binary.
+pub fn serve_at(path: PathBuf, control: Control) {
     // A leftover socket file is not a running server; connecting tells us which.
     if path.exists() && UnixStream::connect(&path).is_err() {
         let _ = std::fs::remove_file(&path);
@@ -171,8 +177,11 @@ fn status_json(s: &Shared) -> String {
 
 /// Send one command to a running fly and return its reply.
 pub fn send(command: &str) -> Result<String> {
-    let path = socket_path();
-    let mut stream = UnixStream::connect(&path).with_context(|| {
+    send_to(&socket_path(), command)
+}
+
+pub fn send_to(path: &std::path::Path, command: &str) -> Result<String> {
+    let mut stream = UnixStream::connect(path).with_context(|| {
         format!(
             "no fly is running (nothing listening on {})",
             path.display()
@@ -264,16 +273,15 @@ mod tests {
     fn commands_round_trip_over_the_socket() {
         let dir = std::env::temp_dir().join(format!("gnat-ctl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        // SAFETY-ish: this test owns the variable for the process, and the
-        // other tests here do not depend on its value.
-        unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
+        let path = dir.join("gnat.sock");
+        let send = |cmd: &str| send_to(&path, cmd);
 
         let control: Control = Arc::new(Mutex::new(Shared {
             state: "idle".into(),
             neurons: 668,
             ..Shared::default()
         }));
-        serve(control.clone());
+        serve_at(path.clone(), control.clone());
         // Give the listener a moment to come up.
         std::thread::sleep(std::time::Duration::from_millis(60));
 

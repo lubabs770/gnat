@@ -17,10 +17,19 @@ you can click to stimulate them. Both of the original's ground-truth suites
 pass: the circuit invariants and all 17 end-to-end behaviour checks.
 
 ```
-cargo run --release -p gnat                  # put a fly on the screen
-cargo run --release -p gnat -- --brain       # the same, plus the brain window
-cargo run --release -p gnat -- --flies 8     # start with eight of them
+cargo build --release && ln -s "$PWD/target/release/gnat" ~/.local/bin/gnat
 ```
+
+```
+gnat                                         # put a fly on the screen
+gnat --brain                                 # the same, plus the brain window
+gnat --flies 8                               # start with eight of them
+```
+
+The connectome is found relative to the executable, so a symlink on `PATH`
+works from any directory. `GNAT_DATA` overrides it, and an override that is
+wrong is an error rather than a silent fallback — otherwise you can never be
+sure which data you are looking at.
 
 ```
 gnat pause | resume | toggle | scare | quit | status
@@ -32,14 +41,14 @@ gnat waybar                             # one line of JSON for a bar module
 ```
 
 ```
-cargo test --workspace                            # 88 tests
-cargo run --release -p gnat -- --simtest          # circuit invariants, on real data
-cargo run --release -p gnat -- --behaviortest     # stimulate neurons, watch the body react
-cargo run --release -p gnat -- --snapshot f.png   # headless render, plus a zoomed crop
-cargo run --release -p gnat -- --brainshot b.png  # headless render of the brain view
-cargo run -p gnat -- --senses                     # one reading from every desktop sense
+cargo test --workspace                            # 91 tests
+gnat --simtest                                    # circuit invariants, on real data
+gnat --behaviortest                               # stimulate neurons, watch the body react
+gnat --snapshot f.png                             # headless render, plus a zoomed crop
+gnat --brainshot b.png                            # headless render of the brain view
+gnat --senses                                     # one reading from every desktop sense
+gnat --overlay-test                               # measure the click-through claim
 cargo run -p gnat-senses --example probe          # live 20s dump of the whole sense layer
-cargo run --release -p gnat -- --overlay-test     # measure the click-through claim
 ```
 
 `--simtest` on this machine:

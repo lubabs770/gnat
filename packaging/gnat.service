@@ -5,8 +5,8 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now gnat
 #
-# WorkingDirectory matters: gnat reads data/circuit.json relative to it. Point
-# it at wherever the repository lives.
+# gnat finds its connectome relative to the executable, so this works wherever
+# the checkout lives. Set GNAT_DATA below if you keep the data somewhere else.
 
 [Unit]
 Description=gnat - a connectome-simulated fruit fly on the desktop
@@ -18,8 +18,8 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/gnat
-ExecStart=%h/gnat/target/release/gnat --run
+# Environment=GNAT_DATA=%h/somewhere/else
+ExecStart=%h/.local/bin/gnat --run
 ExecReload=/bin/kill -HUP $MAINPID
 # The compositor restarting takes the fly with it; come back rather than
 # staying dead until the next login.
