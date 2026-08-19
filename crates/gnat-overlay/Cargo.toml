@@ -8,5 +8,8 @@ description = "A click-through wlr-layer-shell overlay surface for the fly to wa
 
 [dependencies]
 anyhow.workspace = true
-smithay-client-toolkit = "0.21"
+# No default features: `calloop` (we drive our own blocking dispatch loop) and
+# `xkbcommon` (the overlay never takes keyboard focus) both pull in system
+# libraries this crate has no use for.
+smithay-client-toolkit = { version = "0.21", default-features = false }
 wayland-client = "0.31"
