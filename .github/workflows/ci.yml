@@ -18,3 +18,4 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo run --release -p gnat -- --simtest
+      - run: cargo run --release -p gnat -- --behaviortest

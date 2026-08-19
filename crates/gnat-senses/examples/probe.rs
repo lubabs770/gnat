@@ -59,11 +59,8 @@ fn main() -> Result<()> {
         thermal.arousal(40.0, 85.0)
     );
 
-    let phase = circadian::day_phase(SystemTime::now(), 0);
-    println!(
-        "\ncircadian phase (UTC): {phase:.3}  drive: {:.2}",
-        circadian::activity_drive(phase)
-    );
+    let hour = circadian::local_hour(SystemTime::now(), 0);
+    println!("\nclock: {hour:.2}h UTC (the activity curve itself lives in gnat-body)");
 
     // Cursor polling: the one sense that has to be sampled rather than pushed.
     println!("\npolling the cursor at 60 Hz for 2s...");

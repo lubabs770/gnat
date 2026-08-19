@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/gnat-sim",
+    "crates/gnat-body",
     "crates/gnat-senses",
     "crates/gnat-overlay",
     "crates/gnat",
@@ -15,6 +16,7 @@ repository = "https://github.com/lubabs770/gnat"
 
 [workspace.dependencies]
 gnat-sim = { path = "crates/gnat-sim" }
+gnat-body = { path = "crates/gnat-body" }
 gnat-senses = { path = "crates/gnat-senses" }
 gnat-overlay = { path = "crates/gnat-overlay" }
 serde = { version = "1", features = ["derive"] }

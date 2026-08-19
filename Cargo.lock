@@ -57,8 +57,16 @@ name = "gnat"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "gnat-body",
  "gnat-overlay",
  "gnat-senses",
+ "gnat-sim",
+]
+
+[[package]]
+name = "gnat-body"
+version = "0.1.0"
+dependencies = [
  "gnat-sim",
 ]
 

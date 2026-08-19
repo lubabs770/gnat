@@ -10,6 +10,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("--senses") => senses(),
         Some("--simtest") => simtest(),
+        Some("--behaviortest") => behaviortest(),
         Some("--overlay-test") => overlay_test::run(true),
         Some("--overlay-test-control") => overlay_test::run(false),
         Some("--version") | Some("-V") => {
@@ -35,6 +36,7 @@ fn usage() {
          usage:\n\
          \x20 gnat --senses    dump one reading from every desktop sense\n\
          \x20 gnat --simtest   headless circuit test; exits non-zero on failure\n\
+         \x20 gnat --behaviortest          stimulate neurons, watch the body react\n\
          \x20 gnat --overlay-test          prove the overlay passes clicks through\n\
          \x20 gnat --overlay-test-control  the same, with an input region, as a control\n\
          \n\
@@ -46,11 +48,23 @@ fn usage() {
 /// Where the connectome lives, relative to the repository root.
 const CIRCUIT: &str = "data/circuit.json";
 
+/// A fixed seed, so a failure is reproducible. The original draws from the
+/// system RNG and cannot be replayed.
+const SEED: u64 = 0x_F1_1E;
+
 fn simtest() -> Result<()> {
     let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
-    // A fixed seed, so a failure is reproducible; the upstream draws from the
-    // system RNG and cannot be replayed.
-    let report = gnat_sim::simtest::run(circuit, 0x_F1_1E);
+    let report = gnat_sim::simtest::run(circuit, SEED);
+    println!("{report}");
+    if !report.passed() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn behaviortest() -> Result<()> {
+    let circuit = gnat_sim::Circuit::load(CIRCUIT)?;
+    let report = gnat_body::behaviortest::run(&circuit, SEED);
     println!("{report}");
     if !report.passed() {
         std::process::exit(1);

@@ -11,14 +11,15 @@ state machine.
 
 ## Status
 
-The **simulation core is ported and passing the original's own invariants**,
-the **desktop sense layer is working against live Hyprland 0.56.2**, and the
-**click-through overlay is proven**. What is left is the fly itself: body,
-gait, and the brain view.
+Both of the original's ground-truth suites pass — the **circuit invariants** and
+all **17 end-to-end behaviour checks**. The **sense layer works against live
+Hyprland 0.56.2** and the **click-through overlay is proven**. What is left is
+drawing: wiring the senses to the sim, and putting a fly on the screen.
 
 ```
-cargo test --workspace                          # 38 tests
+cargo test --workspace                          # 44 tests
 cargo run --release -p gnat -- --simtest        # circuit invariants, on real data
+cargo run --release -p gnat -- --behaviortest   # stimulate neurons, watch the body react
 cargo run -p gnat -- --senses                   # one reading from every desktop sense
 cargo run -p gnat-senses --example probe        # live 20s dump of the whole sense layer
 cargo run --release -p gnat -- --overlay-test   # measure the click-through claim
@@ -47,9 +48,10 @@ fires **4 ms** after an abrupt loom (bound is ~10 ms), walk-drive duty 26%
 | Crate | What it is | State |
 |---|---|---|
 | `gnat-sim` | LIF circuit sim, `circuit.json` loader, seeded RNG, the invariant suite. No OS dependencies. | **ported** |
-| `gnat-senses` | Hyprland IPC, window terrain, looming, thermal, circadian, activity. | **working** |
+| `gnat-body` | Behaviour states, gait, flight, ledges, sleep, and the 17-check behaviour suite. No OS dependencies. | **ported** |
+| `gnat-senses` | Hyprland IPC, window terrain, looming, thermal, clock, activity. | **working** |
 | `gnat-overlay` | The click-through `wlr-layer-shell` surface, and a software canvas. | **working** |
-| `gnat` | The binary that wires them together. | 4 subcommands |
+| `gnat` | The binary that wires them together. | 5 subcommands |
 
 ## The overlay
 
@@ -134,6 +136,64 @@ Two mechanisms carry most of the behaviour and are easy to break:
 3. **No stim mutex.** The original locks because clicks arrive on the AppKit
    thread. Nothing here is threaded yet; the lock goes back in with the brain
    view, not before.
+4. **Two coordinate frames, named.** `gnat-body` works in the original's scene
+   frame (origin at the centre of the output, +y up) so every ported constant
+   keeps its meaning. `gnat-senses` reports screen coordinates, because that is
+   what Hyprland reports. Converting between them is milestone 5's job and is
+   deliberately not hidden inside either crate.
+
+## The body
+
+FlyWire has no body data, so unlike the circuit this part is *modelled* rather
+than measured — the connectome decides what the fly does, `gnat-body` decides
+what that looks like. Five states (walking, idle, grooming, flying, sleeping), a
+tripod gait, ledge-following, a flight arc with a touchdown flare, and wings.
+
+Every behavioural decision reads a real population's rate, through
+`SignalBuilder`: DNp09 sets walking speed, DNg11 toggles grooming, MDN reverses
+the fly, the DNa01/DNa02 left-right difference steers, DNp02/04/11 raises the
+wings, and a giant-fibre spike takes off. The one piece of cleverness there is
+worth knowing about:
+
+> The DNa left-right difference is high-pass filtered with an 8 s time constant.
+> The connectome has a *persistent* steering asymmetry, so feeding the raw
+> difference to the body makes the fly walk in circles forever. Adapting the
+> baseline out means steady-state walking is straight and only transient
+> asymmetries — something seen, or a click — actually steer.
+
+`--behaviortest` is the original's second ground-truth suite: seven scenarios
+that stimulate real neurons and check what the body does, and ten that hand-build
+signals to exercise body mechanics. All 17 pass.
+
+```
+PASS  GF stim -> escape flight: state=Flying
+PASS  DNp09 stim -> walks, speed rises (capped): state=Walking speed=41
+PASS  DNa-left stim -> left (CCW) turn while walking: heading change +0.27 rad
+PASS  ledge attach + follow window edge: attached, y=-46
+PASS  window closes underfoot -> takeoff: took off
+PASS  sleep signal -> sleeping; wake -> grooming: woke to Grooming
+PASS  thermal tempo scales walking speed: cool 46 -> hot 70 pt/s
+PASS  landing is smooth: no scale/height snap at touchdown: landed=yes, max per-frame d-scale 0.06, d-z 5.5
+...
+ALL BEHAVIOR TESTS PASS (17)
+```
+
+Three of the seventeen are genuinely stochastic, because they drive a noisy
+network and a fly that wanders. Measured over 40 seeds
+(`cargo run --release -p gnat-body --example seed_survey`):
+
+| check | pass rate |
+|---|---|
+| ledge attach + follow window edge | 85% |
+| DNp09 stim -> walks, speed rises | 92% |
+| DNa-left stim -> left turn | 98% |
+| the other fourteen | 100% |
+
+The original has exactly the same property and no way to see it — it draws a
+fresh system-random seed every run, so a flaky check there just looks like an
+occasional mystery failure. Rather than loosen the checks to hide it, the tests
+assert what is actually true: the shipped seed is green, and every check clears
+75% across a seed sweep. A real regression drops a check to near zero.
 
 ## How the macOS senses map onto Wayland
 
@@ -181,9 +241,10 @@ decision, not an engineering gap.
 1. ~~Desktop sense layer against live Hyprland.~~ **Done.**
 2. ~~Port the simulation core and reproduce the documented invariants.~~ **Done.**
 3. ~~Click-through layer-shell overlay, measured rather than asserted.~~ **Done.**
-4. **Fly body and gait** (`FlyModel.swift`), plus the 17 `--behaviortest`
-   checks, driven by the sim's `BrainSignals`.
-5. Wire the senses to the sim: window ledges as terrain, cursor as loom.
+4. ~~Fly body and gait, and all 17 `--behaviortest` checks.~~ **Done.**
+5. **Wire it together**: window ledges as terrain, cursor as loom, thermal as
+   tempo, clock plus idle as sleep — and draw the fly into the overlay. This is
+   the first build where there is something to look at.
 6. Brain view — an ordinary xdg-toplevel, because it wants clicks.
 7. Swap the software canvas for GL once the point cloud needs it.
 8. Control surface: a Waybar module or a socket plus `gnat pause` / `gnat add`.

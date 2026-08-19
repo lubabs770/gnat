@@ -14,4 +14,5 @@ path = "src/main.rs"
 gnat-sim.workspace = true
 gnat-senses.workspace = true
 gnat-overlay.workspace = true
+gnat-body.workspace = true
 anyhow.workspace = true

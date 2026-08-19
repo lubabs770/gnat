@@ -1,37 +1,19 @@
-//! Wall-clock rhythm. Ports from the original for free: no OS API involved.
+//! Wall clock. Ports from the original for free: no OS API involved.
+//!
+//! Only the clock lives here. The *shape* of the fly's day — dawn and dusk
+//! peaks, midday siesta, night quiescence — belongs to the body model, in
+//! `gnat_body::circadian`, because it is biology rather than a desktop sense.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Fraction of the way through the local day, 0.0 at midnight.
-pub fn day_phase(now: SystemTime, utc_offset_secs: i32) -> f32 {
+/// Local hour of the day as a fraction, `0.0..24.0`.
+pub fn local_hour(now: SystemTime, utc_offset_secs: i32) -> f32 {
     let secs = now
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let local = secs + utc_offset_secs as i64;
-    let of_day = local.rem_euclid(86_400) as f32;
-    of_day / 86_400.0
-}
-
-/// Drosophila is crepuscular: two activity peaks, around dawn and dusk, with a
-/// deep midday siesta and a deeper night. Returns 0.0..=1.0.
-pub fn activity_drive(phase: f32) -> f32 {
-    let peak = |centre: f32, width: f32| {
-        let mut d = (phase - centre).abs();
-        if d > 0.5 {
-            d = 1.0 - d; // the day wraps
-        }
-        (-(d * d) / (2.0 * width * width)).exp()
-    };
-    // Dawn near 06:00, dusk near 19:00.
-    let dawn = peak(6.0 / 24.0, 0.045);
-    let dusk = peak(19.0 / 24.0, 0.055);
-    let baseline = if (6.0 / 24.0..19.0 / 24.0).contains(&phase) {
-        0.25
-    } else {
-        0.05
-    };
-    (dawn.max(dusk).max(baseline)).clamp(0.0, 1.0)
+    local.rem_euclid(86_400) as f32 / 3600.0
 }
 
 #[cfg(test)]
@@ -40,25 +22,20 @@ mod tests {
     use std::time::Duration;
 
     fn at(hour: f32) -> f32 {
-        day_phase(UNIX_EPOCH + Duration::from_secs_f32(hour * 3600.0), 0)
+        local_hour(UNIX_EPOCH + Duration::from_secs_f32(hour * 3600.0), 0)
     }
 
     #[test]
-    fn phase_wraps_the_day() {
-        assert!((at(0.0) - 0.0).abs() < 1e-6);
-        assert!((at(12.0) - 0.5).abs() < 1e-4);
-        assert!((at(24.0) - 0.0).abs() < 1e-6);
+    fn hour_wraps_the_day() {
+        assert!((at(0.0) - 0.0).abs() < 1e-4);
+        assert!((at(12.5) - 12.5).abs() < 1e-2);
+        assert!((at(24.0) - 0.0).abs() < 1e-4);
     }
 
     #[test]
-    fn crepuscular_peaks_beat_midday_and_night() {
-        let dawn = activity_drive(6.0 / 24.0);
-        let dusk = activity_drive(19.0 / 24.0);
-        let midday = activity_drive(13.0 / 24.0);
-        let night = activity_drive(3.0 / 24.0);
-
-        assert!(dawn > midday, "dawn {dawn} should beat midday {midday}");
-        assert!(dusk > midday, "dusk {dusk} should beat midday {midday}");
-        assert!(midday > night, "midday {midday} should beat night {night}");
+    fn the_utc_offset_shifts_the_clock() {
+        let utc = local_hour(UNIX_EPOCH + Duration::from_secs(0), 0);
+        let plus_two = local_hour(UNIX_EPOCH + Duration::from_secs(0), 2 * 3600);
+        assert!((plus_two - utc - 2.0).abs() < 1e-4);
     }
 }

@@ -112,6 +112,7 @@ pub struct Neuron {
     pub pos: [f32; 3],
 }
 
+#[derive(Clone)]
 pub struct Circuit {
     pub neurons: Vec<Neuron>,
     /// `(pre, post, signed synapse count)`, before any weight scaling.

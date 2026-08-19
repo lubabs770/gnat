@@ -1,0 +1,10 @@
+[package]
+name = "gnat-body"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The fly's body: behaviour states, gait, flight, ledges, sleep. No OS dependencies."
+
+[dependencies]
+gnat-sim.workspace = true
