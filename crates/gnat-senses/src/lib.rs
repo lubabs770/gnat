@@ -10,6 +10,6 @@ pub mod terrain;
 pub mod thermal;
 
 pub use activity::Activity;
-pub use hypr::{Client, CursorPos, Event, EventStream, Hypr, Monitor};
+pub use hypr::{Client, CursorPos, Event, EventStream, Hypr, LayerLevel, LayerSurface, Monitor};
 pub use terrain::{CursorTracker, Ledge, ledges, loom_drive};
 pub use thermal::Thermal;

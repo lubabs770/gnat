@@ -12,14 +12,16 @@ state machine.
 ## Status
 
 The **simulation core is ported and passing the original's own invariants**,
-and the **desktop sense layer is working against live Hyprland 0.56.2**. What
-is left is the parts that draw: the overlay, the fly body, the brain view.
+the **desktop sense layer is working against live Hyprland 0.56.2**, and the
+**click-through overlay is proven**. What is left is the fly itself: body,
+gait, and the brain view.
 
 ```
-cargo test --workspace                     # 37 tests
-cargo run --release -p gnat -- --simtest   # the circuit invariants, on real data
-cargo run -p gnat -- --senses              # one reading from every desktop sense
-cargo run -p gnat-senses --example probe   # live 20s dump of the whole sense layer
+cargo test --workspace                          # 38 tests
+cargo run --release -p gnat -- --simtest        # circuit invariants, on real data
+cargo run -p gnat -- --senses                   # one reading from every desktop sense
+cargo run -p gnat-senses --example probe        # live 20s dump of the whole sense layer
+cargo run --release -p gnat -- --overlay-test   # measure the click-through claim
 ```
 
 `--simtest` on this machine:
@@ -46,8 +48,50 @@ fires **4 ms** after an abrupt loom (bound is ~10 ms), walk-drive duty 26%
 |---|---|---|
 | `gnat-sim` | LIF circuit sim, `circuit.json` loader, seeded RNG, the invariant suite. No OS dependencies. | **ported** |
 | `gnat-senses` | Hyprland IPC, window terrain, looming, thermal, circadian, activity. | **working** |
-| `gnat-overlay` | The click-through `wlr-layer-shell` surface. | not started |
-| `gnat` | The binary that wires them together. | `--simtest`, `--senses` |
+| `gnat-overlay` | The click-through `wlr-layer-shell` surface, and a software canvas. | **working** |
+| `gnat` | The binary that wires them together. | 4 subcommands |
+
+## The overlay
+
+A `zwlr_layer_surface_v1` on the `overlay` layer, anchored to all four edges so
+the compositor sizes it to the whole output, with `set_exclusive_zone(-1)` so it
+neither reserves space nor pushes tiled windows around, and
+`KeyboardInteractivity::None`.
+
+Click-through is one call: `wl_surface.set_input_region` with an **empty**
+region. A surface with no input region receives no pointer or touch events at
+all, and the compositor routes them to whatever is underneath. Where the macOS
+original had to fake this, Wayland makes it a first-class protocol feature.
+
+That claim is cheap to make, so `--overlay-test` measures it. The overlay counts
+every pointer event addressed to its own surface while a probe thread drives the
+real cursor across it in six warps, over Hyprland's IPC:
+
+```
+layers:      on HDMI-A-2, level overlay, 1920x1080 at 0,0
+cursor:      6/6 warps accepted, ended at 960,540
+focus:       0x55f6ae230440  (unchanged)
+pointer:     0 enters, 0 presses on the overlay surface
+PASS: empty input region — the cursor crossed the whole surface and it never saw a thing.
+```
+
+A zero is only meaningful if a non-zero was possible, so `--overlay-test-control`
+runs the identical sweep with the input region left alone:
+
+```
+pointer:     1 enters, 0 presses on the overlay surface
+PASS (control): with an input region the same sweep IS seen, so the test can fail.
+```
+
+The test also aborts rather than passing if the cursor sweep does not complete —
+a run where the pointer never moved would report zero events and prove nothing.
+It is deliberately **not** in CI: it needs a live compositor, which no GitHub
+runner has.
+
+> Hyprland 0.56 moved dispatchers to Lua. The old flat `dispatch movecursor X Y`
+> is now a syntax error rather than a no-op — the working form is
+> `hl.dsp.cursor.move({x=X,y=Y})`, wrapped by `Hypr::move_cursor`. The first
+> version of this test hit exactly that and reported a vacuous pass.
 
 ## The simulation
 
@@ -136,13 +180,13 @@ decision, not an engineering gap.
 
 1. ~~Desktop sense layer against live Hyprland.~~ **Done.**
 2. ~~Port the simulation core and reproduce the documented invariants.~~ **Done.**
-3. **Click-through layer-shell overlay.** `zwlr_layer_surface_v1` on the
-   `overlay` layer, anchored to all four edges, `set_exclusive_zone(-1)`, and an
-   empty `wl_surface.set_input_region` so clicks pass through. The last
-   genuinely-uncertain piece, and worth proving before anything is drawn.
-4. Fly body and gait (`FlyModel.swift`), plus the 17 `--behaviortest` checks.
-5. Brain view — an ordinary xdg-toplevel, because it wants clicks.
-6. Control surface: a Waybar module or a socket plus `gnat pause` / `gnat add`.
+3. ~~Click-through layer-shell overlay, measured rather than asserted.~~ **Done.**
+4. **Fly body and gait** (`FlyModel.swift`), plus the 17 `--behaviortest`
+   checks, driven by the sim's `BrainSignals`.
+5. Wire the senses to the sim: window ledges as terrain, cursor as loom.
+6. Brain view — an ordinary xdg-toplevel, because it wants clicks.
+7. Swap the software canvas for GL once the point cloud needs it.
+8. Control surface: a Waybar module or a socket plus `gnat pause` / `gnat add`.
 
 ## Data
 

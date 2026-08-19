@@ -8,3 +8,5 @@ description = "A click-through wlr-layer-shell overlay surface for the fly to wa
 
 [dependencies]
 anyhow.workspace = true
+smithay-client-toolkit = "0.21"
+wayland-client = "0.31"

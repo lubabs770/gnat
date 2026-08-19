@@ -1,6 +1,8 @@
 //! Entry point. Wires the desktop senses into the sim and the sim into the
 //! renderer.
 
+mod overlay_test;
+
 use anyhow::Result;
 
 fn main() -> Result<()> {
@@ -8,6 +10,8 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("--senses") => senses(),
         Some("--simtest") => simtest(),
+        Some("--overlay-test") => overlay_test::run(true),
+        Some("--overlay-test-control") => overlay_test::run(false),
         Some("--version") | Some("-V") => {
             println!("gnat {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -31,6 +35,8 @@ fn usage() {
          usage:\n\
          \x20 gnat --senses    dump one reading from every desktop sense\n\
          \x20 gnat --simtest   headless circuit test; exits non-zero on failure\n\
+         \x20 gnat --overlay-test          prove the overlay passes clicks through\n\
+         \x20 gnat --overlay-test-control  the same, with an input region, as a control\n\
          \n\
          not wired up yet: the overlay and the fly body (see README).",
         env!("CARGO_PKG_VERSION")

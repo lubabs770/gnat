@@ -76,6 +76,48 @@ pub fn sort_front_to_back(clients: &mut [Client]) {
     clients.sort_by_key(|c| (!c.floating, c.focus_history_id));
 }
 
+/// One layer-shell surface, as reported by `j/layers`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct LayerSurface {
+    pub namespace: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// Which wlr-layer-shell layer a surface sits on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayerLevel {
+    Background,
+    Bottom,
+    Top,
+    Overlay,
+}
+
+impl LayerLevel {
+    pub fn from_index(i: u8) -> Option<Self> {
+        Some(match i {
+            0 => LayerLevel::Background,
+            1 => LayerLevel::Bottom,
+            2 => LayerLevel::Top,
+            3 => LayerLevel::Overlay,
+            _ => return None,
+        })
+    }
+}
+
+impl std::fmt::Display for LayerLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            LayerLevel::Background => "background",
+            LayerLevel::Bottom => "bottom",
+            LayerLevel::Top => "top",
+            LayerLevel::Overlay => "overlay",
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize)]
 pub struct CursorPos {
     pub x: i32,
@@ -142,6 +184,58 @@ impl Hypr {
 
     pub fn monitors(&self) -> Result<Vec<Monitor>> {
         self.request_json("monitors")
+    }
+
+    /// The focused window, or `None` when nothing is focused.
+    pub fn active_window(&self) -> Result<Option<Client>> {
+        let raw = self.request("j/activewindow")?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing activewindow: {raw:.200}"))?;
+        // An unfocused desktop answers with `{}` rather than null.
+        if value.as_object().is_some_and(|o| o.is_empty()) {
+            return Ok(None);
+        }
+        Ok(Some(serde_json::from_value(value)?))
+    }
+
+    /// Every layer-shell surface, as `(monitor, level, surface)`.
+    pub fn layers(&self) -> Result<Vec<(String, LayerLevel, LayerSurface)>> {
+        #[derive(Deserialize)]
+        struct MonitorLayers {
+            levels: std::collections::HashMap<String, Vec<LayerSurface>>,
+        }
+        let by_monitor: std::collections::HashMap<String, MonitorLayers> =
+            self.request_json("layers")?;
+
+        let mut out = Vec::new();
+        for (monitor, m) in by_monitor {
+            for (level, surfaces) in m.levels {
+                let Some(level) = level.parse().ok().and_then(LayerLevel::from_index) else {
+                    continue;
+                };
+                for s in surfaces {
+                    out.push((monitor.clone(), level, s));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Run a Hyprland dispatcher.
+    ///
+    /// Hyprland 0.56 replaced the flat `dispatch movecursor 400 400` syntax
+    /// with Lua: the server wraps whatever it receives in
+    /// `return hl.dispatch(...)`, so the argument has to be a dispatcher
+    /// expression and the old form is a syntax error, not a no-op.
+    pub fn dispatch(&self, lua: &str) -> Result<()> {
+        let reply = self.request(&format!("dispatch {lua}"))?;
+        anyhow::ensure!(reply.trim() == "ok", "dispatch `{lua}` said: {reply}");
+        Ok(())
+    }
+
+    /// Warp the cursor to absolute layout coordinates.
+    pub fn move_cursor(&self, x: i32, y: i32) -> Result<()> {
+        self.dispatch(&format!("hl.dsp.cursor.move({{x={x},y={y}}})"))
     }
 }
 
@@ -331,6 +425,14 @@ mod tests {
             .map(|c| (c.floating, c.focus_history_id))
             .collect();
         assert_eq!(order, vec![(true, 1), (true, 3), (false, 0), (false, 1)]);
+    }
+
+    #[test]
+    fn layer_levels_map_to_names() {
+        assert_eq!(LayerLevel::from_index(3), Some(LayerLevel::Overlay));
+        assert_eq!(LayerLevel::from_index(0), Some(LayerLevel::Background));
+        assert_eq!(LayerLevel::from_index(9), None);
+        assert_eq!(LayerLevel::Overlay.to_string(), "overlay");
     }
 
     #[test]
