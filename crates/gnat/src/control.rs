@@ -65,9 +65,17 @@ pub type Control = Arc<Mutex<Shared>>;
 /// thousand of them.
 pub const MAX_FLIES: usize = 64;
 
-pub fn socket_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(dir).join("gnat.sock")
+pub fn socket_path() -> Result<PathBuf> {
+    socket_path_in(std::env::var("XDG_RUNTIME_DIR").ok())
+}
+
+/// No fallback to `/tmp` when the runtime dir is missing: that directory is
+/// shared, so another user could squat the name and answer for the fly.
+fn socket_path_in(runtime_dir: Option<String>) -> Result<PathBuf> {
+    let dir = runtime_dir
+        .filter(|d| !d.is_empty())
+        .context("XDG_RUNTIME_DIR is not set")?;
+    Ok(PathBuf::from(dir).join("gnat.sock"))
 }
 
 /// Start the control socket, replacing any stale one left by a crash.
@@ -75,7 +83,10 @@ pub fn socket_path() -> PathBuf {
 /// Returns without a listener rather than failing the whole program: a fly you
 /// cannot pause is better than no fly.
 pub fn serve(control: Control) {
-    serve_at(socket_path(), control)
+    match socket_path() {
+        Ok(path) => serve_at(path, control),
+        Err(e) => eprintln!("control socket unavailable: {e}"),
+    }
 }
 
 /// Bind a specific path. Split out so tests can use a private socket instead of
@@ -177,7 +188,7 @@ fn status_json(s: &Shared) -> String {
 
 /// Send one command to a running fly and return its reply.
 pub fn send(command: &str) -> Result<String> {
-    send_to(&socket_path(), command)
+    send_to(&socket_path()?, command)
 }
 
 pub fn send_to(path: &std::path::Path, command: &str) -> Result<String> {
@@ -254,9 +265,11 @@ mod tests {
 
     #[test]
     fn the_socket_lives_under_the_runtime_dir() {
-        let p = socket_path();
-        assert!(p.ends_with("gnat.sock"), "{}", p.display());
-        assert!(p.is_absolute());
+        let p = socket_path_in(Some("/run/user/1000".into())).unwrap();
+        assert_eq!(p, PathBuf::from("/run/user/1000/gnat.sock"));
+        // Never a shared directory instead.
+        assert!(socket_path_in(None).is_err());
+        assert!(socket_path_in(Some(String::new())).is_err());
     }
 
     #[test]
