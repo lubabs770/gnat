@@ -178,7 +178,12 @@ pub fn brainshot(
 
     // The brain view is opaque, so it only needs the alpha flattened.
     let mut out = vec![0u8; rgba.len()];
-    for (o, p) in out.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+    for (o, p) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(rgba.as_chunks::<4>().0.iter())
+    {
         o.copy_from_slice(&[p[2], p[1], p[0], 255]);
     }
     png::write_rgba(path, w, h, &out)?;
@@ -207,10 +212,10 @@ mod tests {
         const N: u32 = CHECKER * 3;
         let pixels = vec![0u8; (N * N * 4) as usize];
         let out = composite(&pixels, N, N);
-        assert!(out.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(out.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
         // A fully transparent canvas must show the checkerboard, not black.
-        assert!(out.chunks_exact(4).any(|p| p[0] == 48));
-        assert!(out.chunks_exact(4).any(|p| p[0] == 64));
+        assert!(out.as_chunks::<4>().0.iter().any(|p| p[0] == 48));
+        assert!(out.as_chunks::<4>().0.iter().any(|p| p[0] == 64));
     }
 
     #[test]

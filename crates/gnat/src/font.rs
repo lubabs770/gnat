@@ -137,7 +137,7 @@ mod tests {
             2,
             Rgba::opaque(255, 255, 255),
         );
-        assert!(px.chunks_exact(4).all(|p| p[3] == 0));
+        assert!(px.as_chunks::<4>().0.iter().all(|p| p[3] == 0));
     }
 
     #[test]

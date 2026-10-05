@@ -233,7 +233,7 @@ mod tests {
     }
 
     fn painted(px: &[u8]) -> usize {
-        px.chunks_exact(4).filter(|p| p[3] > 0).count()
+        px.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count()
     }
 
     #[test]
