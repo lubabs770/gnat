@@ -362,6 +362,52 @@ cp packaging/gnat.service ~/.config/systemd/user/
 systemctl --user enable --now gnat
 ```
 
+## As an Omarchy plugin
+
+On Omarchy the same controls are an overlay plugin in the running
+`omarchy-shell`: plugin id `io.github.lubabs770.omafly`, kind `overlay`, entry
+point `qml/Overlay.qml`, `manifest.json` at the repo root. It shows what the fly
+is doing and gives you pause, scare, brain, the fly count and quit — or a start
+button when no fly is running — coloured by the shell's live theme.
+
+The plugin is only the UI. It drives the `gnat` binary, found via `$GNAT_BIN`,
+`PATH` or `~/.local/bin`; if there is none, the panel says so instead of
+showing an empty card. No prebuilt binary is published: build it from a
+checkout of the same commit as the plugin (see [Status](#status)). The plugin
+writes no files and changes no config; everything it does is a `gnat`
+subcommand over the user-private control socket in `$XDG_RUNTIME_DIR`.
+
+Then either add the plugin from the repo, or link the checkout in:
+
+```
+omarchy plugin add https://github.com/lubabs770/gnat
+# or, from a checkout:
+ln -sfn "$PWD" ~/.config/omarchy/plugins/io.github.lubabs770.omafly
+omarchy-shell -q shell rescanPlugins && omarchy plugin enable io.github.lubabs770.omafly
+```
+
+```
+omarchy-shell shell toggle io.github.lubabs770.omafly    # open / close the panel
+omarchy plugin remove io.github.lubabs770.omafly         # unlinks; nothing else is touched
+```
+
+To remove gnat itself as well: `gnat quit`, then `rm ~/.local/bin/gnat`, and
+`systemctl --user disable --now gnat` plus
+`rm ~/.config/systemd/user/gnat.service` if you installed the unit.
+
+Bind the toggle to a key in `~/.config/hypr/bindings.lua`, or point the Waybar
+module's `on-click` at it.
+
+| Key | Does |
+|---|---|
+| Space | pause / resume |
+| `s` | scare |
+| `b` | open the brain view |
+| `-` `+` | one fewer / one more fly |
+| `q` | quit the fly |
+| Enter | start a fly, when none is running |
+| Esc | close (or click outside the card) |
+
 ## Outputs
 
 `gnat outputs` lists them; `gnat --output HDMI-A-2` pins the overlay to one.
