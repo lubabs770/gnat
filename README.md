@@ -20,6 +20,13 @@ pass: the circuit invariants and all 17 end-to-end behaviour checks.
 cargo build --release && ln -s "$PWD/target/release/gnat" ~/.local/bin/gnat
 ```
 
+Or take a [release](https://github.com/lubabs770/gnat/releases): CI builds
+`gnat-linux-x86_64.tar.gz` (the binary, `data/` and `packaging/`) from each `v*`
+tag. Releases are immutable, and `gh release verify-asset <tag>
+gnat-linux-x86_64.tar.gz -R lubabs770/gnat` checks a download against GitHub's
+attestation. Unpack it somewhere permanent and link the binary onto `PATH`; it
+finds `data/` beside itself.
+
 ```
 gnat                                         # put a fly on the screen
 gnat --brain                                 # the same, plus the brain window
