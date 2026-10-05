@@ -362,6 +362,9 @@ cp packaging/gnat.service ~/.config/systemd/user/
 systemctl --user enable --now gnat
 ```
 
+On Omarchy, [omafly](https://github.com/lubabs770/omafly) puts the same
+controls in a themed overlay panel inside `omarchy-shell`.
+
 ## Outputs
 
 `gnat outputs` lists them; `gnat --output HDMI-A-2` pins the overlay to one.
