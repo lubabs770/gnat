@@ -1,0 +1,58 @@
+name: release
+
+# A v* tag builds gnat with its connectome data and publishes the bundle as a
+# GitHub release. Releases on this repo are immutable, so a published tag and
+# its asset can't be replaced afterwards.
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # The tag must match the crate version, so a release can never ship a
+      # mislabelled binary.
+      - name: Check the version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          crate=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "gnat") | .version')
+          if [ "$version" != "$crate" ]; then
+            echo "tag $GITHUB_REF_NAME vs gnat $crate" >&2
+            exit 1
+          fi
+
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p gnat
+
+      # The binary finds data/ beside itself, so the bundle is the binary, the
+      # data, and the packaging examples, nothing else.
+      - name: Bundle
+        run: |
+          mkdir -p dist/gnat
+          cp target/release/gnat LICENSE README.md dist/gnat/
+          cp -r data packaging dist/gnat/
+          tar -C dist -czf gnat-linux-x86_64.tar.gz gnat
+          sha256sum gnat-linux-x86_64.tar.gz
+          # Unpack and run it outside the checkout, so this proves the bundle
+          # finds its own data rather than the repository's.
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -C "$RUNNER_TEMP/unpacked" -xzf gnat-linux-x86_64.tar.gz
+          cd "$RUNNER_TEMP" && unpacked/gnat/gnat --version && unpacked/gnat/gnat --simtest
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" gnat-linux-x86_64.tar.gz \
+            --title "gnat $GITHUB_REF_NAME" --generate-notes
